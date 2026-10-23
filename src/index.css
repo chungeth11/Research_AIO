@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+body {
+  font-family: Inter, "Segoe UI", Aptos, system-ui, sans-serif;
+  font-feature-settings: "tnum";
+}
