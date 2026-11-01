@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import LabSelector from '../UIparts/LabSelector'
+import { getLabMembersStorageKey } from '../utils/labHome'
 const scheduleExamples = [
 {
     id: 1,
@@ -45,7 +46,7 @@ const endHour = 24
 const slotHeight = 56
 const experimentStorageKey = 'research-aio-experiments'
 const scheduleStorageKey = 'research-aio-scheduled-experiments'
-const labMembersStorageKey = 'research-aio-lab-members'
+const legacyLabMembersStorageKey = 'research-aio-lab-members'
 
 const colorPalette = ['#93c5fd', '#f9a8d4', '#86efac', '#fcd34d', '#c4b5fd', '#fdba74', '#67e8f9', '#fca5a5', '#a7f3d0', '#bfdbfe', '#fde68a', '#ddd6fe']
 
@@ -242,12 +243,12 @@ function ExperimentDetailsModal({ experiment, onClose, onDelete, onDeleteSeries 
           </button>
         </div>
         <dl className="mt-5 space-y-3 text-sm">
+          <div>
+            <dt className="font-semibold text-slate-700">Lab members</dt>
+            <dd className="mt-1 text-slate-600">{experiment.students || 'Not assigned'}</dd>
+          </div>
           {!experiment.isCustomEvent && (
             <>
-              <div>
-                <dt className="font-semibold text-slate-700">Lab members</dt>
-                <dd className="mt-1 text-slate-600">{experiment.students || 'Not assigned'}</dd>
-              </div>
               <div>
                 <dt className="font-semibold text-slate-700">Materials</dt>
                 <dd className="mt-1 text-slate-600">{experiment.drugs || 'Not specified'}</dd>
@@ -326,9 +327,10 @@ function Schedule({
   const scopedScheduleStorageKey = selectedLabId === 1
     ? scheduleStorageKey
     : `${scheduleStorageKey}-lab-${selectedLabId}`
-  const scopedLabMembersStorageKey = selectedLabId === 1
-    ? labMembersStorageKey
-    : `${labMembersStorageKey}-lab-${selectedLabId}`
+  const scopedLabMembersStorageKey = getLabMembersStorageKey(selectedLabId)
+  const legacyScopedLabMembersStorageKey = selectedLabId === 1
+    ? legacyLabMembersStorageKey
+    : `${legacyLabMembersStorageKey}-lab-${selectedLabId}`
   const labSeedExperiments = (selectedLabId === 1 ? scheduleExamples : [])
   const [visibleWeekStart, setVisibleWeekStart] = useState(() =>
     calendarFocus?.date
@@ -381,23 +383,31 @@ function Schedule({
     }
   })
   const [labMembers] = useState(() => {
+    const defaultMembers = selectedLabId === 1
+      ? ['Dr. Lee', 'Ava Chen', 'Marcus Ross', 'Janelle Ortiz', 'Ethan Price']
+      : []
     if (typeof window === 'undefined') {
-      return selectedLabId === 1
-        ? ['Dr. Lee', 'Ava Chen', 'Marcus Ross', 'Janelle Ortiz', 'Ethan Price']
-        : []
+      return defaultMembers
     }
 
     try {
-      const storedValue = window.localStorage.getItem(scopedLabMembersStorageKey)
-      return storedValue
-        ? JSON.parse(storedValue)
-        : selectedLabId === 1
-          ? ['Dr. Lee', 'Ava Chen', 'Marcus Ross', 'Janelle Ortiz', 'Ethan Price']
-          : []
+      const storedRoster = window.localStorage.getItem(scopedLabMembersStorageKey)
+      const storedLegacyMembers = storedRoster
+        ? null
+        : window.localStorage.getItem(legacyScopedLabMembersStorageKey)
+      const storedValue = storedRoster ?? storedLegacyMembers
+      if (!storedValue) return defaultMembers
+
+      const members = JSON.parse(storedValue)
+      if (!Array.isArray(members)) {
+        throw new Error('Lab members are not in the expected format.')
+      }
+
+      return members
+        .map((member) => typeof member === 'string' ? member : member?.email)
+        .filter((member) => typeof member === 'string' && member.trim())
     } catch {
-      return selectedLabId === 1
-        ? ['Dr. Lee', 'Ava Chen', 'Marcus Ross', 'Janelle Ortiz', 'Ethan Price']
-        : []
+      return defaultMembers
     }
   })
   const [showForm, setShowForm] = useState(false)
@@ -422,6 +432,7 @@ function Schedule({
     time: '09:00',
     endTime: '10:00',
     tools: '',
+    assignedLabMembers: [],
     repeatFrequency: 'never',
     repeatUntil: shiftDateKey(getDateKey(new Date()), 28),
   })
@@ -602,7 +613,7 @@ function Schedule({
         date,
         time: quickEvent.time,
         endTime: quickEvent.endTime,
-        students: '',
+        students: quickEvent.assignedLabMembers.join(', '),
         drugs: '',
         tools: quickEvent.tools.trim(),
         color: colorPalette[0],
@@ -624,6 +635,7 @@ function Schedule({
       time: '09:00',
       endTime: '10:00',
       tools: '',
+      assignedLabMembers: [],
       repeatFrequency: 'never',
       repeatUntil: shiftDateKey(getDateKey(new Date()), 28),
     })
@@ -850,24 +862,33 @@ function Schedule({
               </label>
             )}
 
-            <label className="text-sm font-medium text-slate-700 md:col-span-2 ">
-              Lab members
-              <select
-                multiple
-                value={formState.assignedLabMembers}
-                onChange={(event) => {
-                  const selectedOptions = Array.from(event.target.selectedOptions, (option) => option.value)
-                  setFormState((current) => ({ ...current, assignedLabMembers: selectedOptions }))
-                }}
-                className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500 overflow-y-auto max-h-28"
-              >
-                {labMembers.map((member) => (
-                  <option key={member} value={member} className="max-h-28 overflow-y-auto">
-                    {member}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <fieldset className="md:col-span-2">
+              <legend className="text-sm font-medium text-slate-700">Who should be in this experiment?</legend>
+              {labMembers.length ? (
+                <div className="mt-2 grid gap-2 rounded-xl border border-slate-300 p-3 sm:grid-cols-2">
+                  {labMembers.map((member) => (
+                    <label key={member} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={formState.assignedLabMembers.includes(member)}
+                        onChange={() => setFormState((current) => ({
+                          ...current,
+                          assignedLabMembers: current.assignedLabMembers.includes(member)
+                            ? current.assignedLabMembers.filter((selectedMember) => selectedMember !== member)
+                            : [...current.assignedLabMembers, member],
+                        }))}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      {member}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                  No lab members are listed yet.
+                </p>
+              )}
+            </fieldset>
 
             <label className="text-sm font-medium text-slate-700 md:col-span-2">
               Calendar color
@@ -978,6 +999,33 @@ function Schedule({
                 className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
               />
             </label>
+            <fieldset className="md:col-span-2">
+              <legend className="text-sm font-medium text-slate-700">Who should be in this event?</legend>
+              {labMembers.length ? (
+                <div className="mt-2 grid gap-2 rounded-xl border border-slate-300 p-3 sm:grid-cols-2">
+                  {labMembers.map((member) => (
+                    <label key={member} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={quickEvent.assignedLabMembers.includes(member)}
+                        onChange={() => setQuickEvent((current) => ({
+                          ...current,
+                          assignedLabMembers: current.assignedLabMembers.includes(member)
+                            ? current.assignedLabMembers.filter((selectedMember) => selectedMember !== member)
+                            : [...current.assignedLabMembers, member],
+                        }))}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      {member}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                  No lab members are listed yet.
+                </p>
+              )}
+            </fieldset>
             <label className="text-sm font-medium text-slate-700">
               Repeat
               <select
