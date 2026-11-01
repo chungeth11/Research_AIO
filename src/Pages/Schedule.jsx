@@ -1,17 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
-
-const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const startHour = 0
-const endHour = 24
-const slotHeight = 56
-const experimentStorageKey = 'research-aio-experiments'
-const scheduleStorageKey = 'research-aio-scheduled-experiments'
-const labMembersStorageKey = 'research-aio-lab-members'
-
-const colorPalette = ['#93c5fd', '#f9a8d4', '#86efac', '#fcd34d', '#c4b5fd', '#fdba74', '#67e8f9', '#fca5a5', '#a7f3d0', '#bfdbfe', '#fde68a', '#ddd6fe']
-
-const seedExperiments = [
-  {
+import { useEffect, useMemo, useRef, useState } from 'react'
+import LabSelector from '../UIparts/LabSelector'
+const scheduleExamples = [
+{
     id: 1,
     title: 'Dose-response assay',
     date: '2026-08-03',
@@ -23,7 +13,7 @@ const seedExperiments = [
     instructions: '1. Prepare the reagent panel and align each sample on the plate.\n2. Run the dose sweep and confirm instrument calibration.\n3. Record the result for each concentration before analysis.',
     color: '#93c5fd',
   },
-  {
+{
     id: 2,
     title: 'Bioreactor check',
     date: '2026-08-05',
@@ -35,7 +25,7 @@ const seedExperiments = [
     instructions: '1. Confirm the reactor is stable at the current set point.\n2. Log pH, temperature, and feed rate against the baseline.\n3. Flag any drift before the next scheduled read.',
     color: '#f9a8d4',
   },
-  {
+{
     id: 3,
     title: 'Compound screen',
     date: '2026-08-07',
@@ -46,8 +36,18 @@ const seedExperiments = [
     notes: 'Score the top three candidates for stability.',
     instructions: '1. Load the plate reader with the ranked candidate set.\n2. Capture the stability score for each lead panel.\n3. Compare the top three results and document the recommendation.',
     color: '#86efac',
-  },
-]
+  }
+];
+
+const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const startHour = 0
+const endHour = 24
+const slotHeight = 56
+const experimentStorageKey = 'research-aio-experiments'
+const scheduleStorageKey = 'research-aio-scheduled-experiments'
+const labMembersStorageKey = 'research-aio-lab-members'
+
+const colorPalette = ['#93c5fd', '#f9a8d4', '#86efac', '#fcd34d', '#c4b5fd', '#fdba74', '#67e8f9', '#fca5a5', '#a7f3d0', '#bfdbfe', '#fde68a', '#ddd6fe']
 
 function getWeekStart(date) {
   const result = new Date(date)
@@ -202,7 +202,7 @@ function getEventLayout(dayExperiments) {
   }))
 }
 
-function ExperimentDetailsModal({ experiment, onClose, onDelete }) {
+function ExperimentDetailsModal({ experiment, onClose, onDelete, onDeleteSeries }) {
   if (!experiment) return null
 
   return (
@@ -242,21 +242,29 @@ function ExperimentDetailsModal({ experiment, onClose, onDelete }) {
           </button>
         </div>
         <dl className="mt-5 space-y-3 text-sm">
+          {!experiment.isCustomEvent && (
+            <>
+              <div>
+                <dt className="font-semibold text-slate-700">Lab members</dt>
+                <dd className="mt-1 text-slate-600">{experiment.students || 'Not assigned'}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-slate-700">Materials</dt>
+                <dd className="mt-1 text-slate-600">{experiment.drugs || 'Not specified'}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-slate-700">Equipment</dt>
+                <dd className="mt-1 text-slate-600">{experiment.tools || 'Not specified'}</dd>
+              </div>
+            </>
+          )}
           <div>
-            <dt className="font-semibold text-slate-700">Lab members</dt>
-            <dd className="mt-1 text-slate-600">{experiment.students || 'Not assigned'}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-slate-700">Materials</dt>
-            <dd className="mt-1 text-slate-600">{experiment.drugs || 'Not specified'}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-slate-700">Equipment</dt>
-            <dd className="mt-1 text-slate-600">{experiment.tools || 'Not specified'}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-slate-700">Notes</dt>
-            <dd className="mt-1 whitespace-pre-wrap text-slate-600">{experiment.notes || 'No notes added.'}</dd>
+            <dt className="font-semibold text-slate-700">
+              {experiment.description ? 'Description' : 'Notes'}
+            </dt>
+            <dd className="mt-1 whitespace-pre-wrap text-slate-600">
+              {experiment.description || experiment.notes || 'No notes added.'}
+            </dd>
           </div>
           {experiment.instructions && (
             <div>
@@ -265,7 +273,21 @@ function ExperimentDetailsModal({ experiment, onClose, onDelete }) {
             </div>
           )}
         </dl>
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          {experiment.recurrenceId
+            && experiment.repeatFrequency
+            && experiment.repeatFrequency !== 'never' && (
+            <button
+              type="button"
+              onClick={() => {
+                onDeleteSeries(experiment.recurrenceId)
+                onClose()
+              }}
+              className="mr-auto rounded-full border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-800 hover:bg-rose-50"
+            >
+              Remove all repeated events
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -289,27 +311,52 @@ function ExperimentDetailsModal({ experiment, onClose, onDelete }) {
   )
 }
 
-function Schedule({ lab, selectedLabId }) {
+function Schedule({
+  lab,
+  selectedLabId,
+  onSelectedLabChange,
+  calendarFocus,
+  onCalendarFocusHandled,
+}) {
   const scopedExperimentStorageKey = selectedLabId === 1
     ? experimentStorageKey
     : `${experimentStorageKey}-lab-${selectedLabId}`
+  const scopedExperimentRecordsStorageKey = `research-aio-experiment-records-lab-${selectedLabId}`
   const scopedScheduleStorageKey = selectedLabId === 1
     ? scheduleStorageKey
     : `${scheduleStorageKey}-lab-${selectedLabId}`
   const scopedLabMembersStorageKey = selectedLabId === 1
     ? labMembersStorageKey
     : `${labMembersStorageKey}-lab-${selectedLabId}`
-  const labSeedExperiments = selectedLabId === 1 ? seedExperiments : []
-  const [visibleWeekStart, setVisibleWeekStart] = useState(getWeekStart(new Date()))
+  const labSeedExperiments = (selectedLabId === 1 ? scheduleExamples : [])
+  const [visibleWeekStart, setVisibleWeekStart] = useState(() =>
+    calendarFocus?.date
+      ? getWeekStart(new Date(`${calendarFocus.date}T12:00:00`))
+      : getWeekStart(new Date()),
+  )
+  const calendarViewportRef = useRef(null)
   const [savedExperiments] = useState(() => {
     if (typeof window === 'undefined') {
       return labSeedExperiments
     }
 
     try {
+      const storedRecords = window.localStorage.getItem(scopedExperimentRecordsStorageKey)
+      if (storedRecords) {
+        const experimentRecords = JSON.parse(storedRecords)
+        if (!Array.isArray(experimentRecords)) {
+          throw new Error('Experiment records are not in the expected format.')
+        }
+        return experimentRecords.map((experiment) => ({
+          ...experiment,
+          title: experiment.name,
+        }))
+      }
+
       const storedValue = window.localStorage.getItem(scopedExperimentStorageKey)
       return storedValue ? JSON.parse(storedValue) : labSeedExperiments
-    } catch {
+    } catch (error) {
+      console.error('Could not load saved experiments for the schedule:', error)
       return labSeedExperiments
     }
   })
@@ -353,6 +400,7 @@ function Schedule({ lab, selectedLabId }) {
     }
   })
   const [showForm, setShowForm] = useState(false)
+  const [showQuickEventForm, setShowQuickEventForm] = useState(false)
   const [selectedExperiment, setSelectedExperiment] = useState(null)
   const [selectedMember, setSelectedMember] = useState('all')
   const [formState, setFormState] = useState({
@@ -366,6 +414,17 @@ function Schedule({ lab, selectedLabId }) {
     color: colorPalette[0],
   })
   const [formError, setFormError] = useState('')
+  const [quickEvent, setQuickEvent] = useState({
+    title: '',
+    description: '',
+    date: getDateKey(new Date()),
+    time: '09:00',
+    endTime: '10:00',
+    tools: '',
+    repeatFrequency: 'never',
+    repeatUntil: shiftDateKey(getDateKey(new Date()), 28),
+  })
+  const [quickEventError, setQuickEventError] = useState('')
 
   const visibleWeekDates = useMemo(
     () =>
@@ -390,6 +449,76 @@ function Schedule({ lab, selectedLabId }) {
     window.localStorage.setItem(scopedScheduleStorageKey, JSON.stringify(scheduledExperiments))
   }, [scheduledExperiments, scopedScheduleStorageKey])
 
+  useEffect(() => {
+    try {
+      const storedRecords = window.localStorage.getItem(scopedExperimentRecordsStorageKey)
+      if (!storedRecords) return
+
+      const experimentRecords = JSON.parse(storedRecords)
+      if (!Array.isArray(experimentRecords)) {
+        throw new Error('Experiment records are not in the expected format.')
+      }
+
+      const updatedRecords = experimentRecords.map((experiment) => {
+        const matchingEvents = scheduledExperiments
+          .filter((scheduledExperiment) =>
+            !scheduledExperiment.isCustomEvent
+            && (
+              String(scheduledExperiment.sourceExperimentId ?? '') === String(experiment.id)
+              || (
+                scheduledExperiment.sourceExperimentId === undefined
+                && scheduledExperiment.title === experiment.name
+              )
+            ),
+          )
+          .filter((scheduledExperiment) => scheduledExperiment.date)
+          .sort((left, right) =>
+            left.date.localeCompare(right.date)
+            || (left.time ?? '').localeCompare(right.time ?? ''),
+          )
+        const matchingDates = matchingEvents.map((scheduledExperiment) => scheduledExperiment.date)
+
+        const calendarSchedule = matchingDates.length
+            ? {
+                startDate: matchingDates[0],
+                endDate: matchingDates[matchingDates.length - 1],
+                dates: [...new Set(matchingDates)],
+                events: matchingEvents.map(({ date, time, endTime }) => ({
+                  date,
+                  time,
+                  endTime,
+                })),
+              }
+            : null
+
+        return { ...experiment, calendarSchedule }
+      })
+
+      window.localStorage.setItem(
+        scopedExperimentRecordsStorageKey,
+        JSON.stringify(updatedRecords),
+      )
+    } catch (error) {
+      console.error('Could not synchronize calendar dates with experiments:', error)
+    }
+  }, [scheduledExperiments, scopedExperimentRecordsStorageKey])
+
+  useEffect(() => {
+    if (!calendarFocus?.date || !calendarViewportRef.current) return
+
+    const targetEvent = Array.from(
+      calendarViewportRef.current.querySelectorAll('[data-calendar-event="true"]'),
+    ).find((element) =>
+      element.dataset.date === calendarFocus.date
+      && (!calendarFocus.time || element.dataset.time === calendarFocus.time),
+    )
+
+    if (!targetEvent) return
+
+    targetEvent.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+    onCalendarFocusHandled?.()
+  }, [calendarFocus, onCalendarFocusHandled, scheduledExperiments, visibleWeekStart])
+
   const experimentMap = useMemo(() => {
     const visibleExperiments = selectedMember === 'all'
       ? scheduledExperiments
@@ -409,6 +538,7 @@ function Schedule({ lab, selectedLabId }) {
   )
 
   const handleOpenForm = () => {
+    setShowQuickEventForm(false)
     setShowForm((current) => !current)
     setFormError('')
     setFormState((current) => ({
@@ -418,6 +548,86 @@ function Schedule({ lab, selectedLabId }) {
         ? shiftDateKey(getDateKey(visibleWeekStart), 28)
         : current.repeatUntil,
     }))
+  }
+
+  const handleOpenQuickEventForm = () => {
+    setShowForm(false)
+    setQuickEventError('')
+    setShowQuickEventForm((current) => !current)
+  }
+
+  const handleQuickEventSubmit = (event) => {
+    event.preventDefault()
+
+    if (!quickEvent.title.trim() || !quickEvent.description.trim() || !quickEvent.date || !quickEvent.time || !quickEvent.endTime) {
+      setQuickEventError('Enter an event name, description, date, start time, and end time.')
+      return
+    }
+
+    if (quickEvent.repeatFrequency !== 'never' && quickEvent.repeatUntil < quickEvent.date) {
+      setQuickEventError('Repeat-until date must be on or after the event date.')
+      return
+    }
+
+    const startMinutes = getTimeValue(quickEvent.time)
+    let endMinutes = getTimeValue(quickEvent.endTime)
+    if (endMinutes <= startMinutes) endMinutes += 24 * 60
+    if (endMinutes - startMinutes > 24 * 60) {
+      setQuickEventError('Event duration must be less than 24 hours.')
+      return
+    }
+
+    const occurrenceDates = [quickEvent.date]
+    if (quickEvent.repeatFrequency !== 'never') {
+      const repeatStep = quickEvent.repeatFrequency === 'daily' ? 1 : 7
+      for (
+        let occurrenceDate = shiftDateKey(quickEvent.date, repeatStep);
+        occurrenceDate <= quickEvent.repeatUntil;
+        occurrenceDate = shiftDateKey(occurrenceDate, repeatStep)
+      ) {
+        occurrenceDates.push(occurrenceDate)
+      }
+    }
+    const recurrenceId = quickEvent.repeatFrequency === 'never'
+      ? null
+      : `event-series-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+    setScheduledExperiments((current) => [
+      ...occurrenceDates.map((date, index) => ({
+        id: recurrenceId ? `${recurrenceId}-${index}` : `event-${Date.now()}`,
+        isCustomEvent: true,
+        title: quickEvent.title.trim(),
+        description: quickEvent.description.trim(),
+        date,
+        time: quickEvent.time,
+        endTime: quickEvent.endTime,
+        students: '',
+        drugs: '',
+        tools: quickEvent.tools.trim(),
+        color: colorPalette[0],
+        ...(recurrenceId
+          ? {
+              recurrenceId,
+              repeatFrequency: quickEvent.repeatFrequency,
+              repeatUntil: quickEvent.repeatUntil,
+            }
+          : {}),
+      })),
+      ...current,
+    ])
+    setVisibleWeekStart(getWeekStart(new Date(`${quickEvent.date}T12:00:00`)))
+    setQuickEvent({
+      title: '',
+      description: '',
+      date: getDateKey(new Date()),
+      time: '09:00',
+      endTime: '10:00',
+      tools: '',
+      repeatFrequency: 'never',
+      repeatUntil: shiftDateKey(getDateKey(new Date()), 28),
+    })
+    setQuickEventError('')
+    setShowQuickEventForm(false)
   }
 
   const handleSubmit = (event) => {
@@ -461,6 +671,7 @@ function Schedule({ lab, selectedLabId }) {
     const occurrences = occurrenceDates.map((date, index) => ({
         ...baseExperiment,
         id: `${recurrenceId}-${index}`,
+        sourceExperimentId: baseExperiment.sourceExperimentId ?? baseExperiment.id,
         recurrenceId,
         date,
         time: formState.time,
@@ -491,23 +702,42 @@ function Schedule({ lab, selectedLabId }) {
     setScheduledExperiments((current) => current.filter((experiment) => experiment.id !== experimentId))
   }
 
+  const handleDeleteSeries = (recurrenceId) => {
+    setScheduledExperiments((current) =>
+      current.filter((experiment) => experiment.recurrenceId !== recurrenceId),
+    )
+  }
+
   return (
     <main className="flex-1 overflow-y-auto bg-slate-50 pb-8 ">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-blue-500">Schedule</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-            Weekly experiment calendar
+            Weekly Lab Calendar
           </h1>
           <p className="mt-1 text-sm text-slate-500">{lab.name}</p>
         </div>
-        <button
-          type="button"
-          onClick={handleOpenForm}
-          className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700"
-        >
-          {showForm ? 'Hide form' : 'Add event'}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <LabSelector
+            selectedLabId={selectedLabId}
+            onSelectedLabChange={onSelectedLabChange}
+          />
+          <button
+            type="button"
+            onClick={handleOpenForm}
+            className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700"
+          >
+            {showForm ? 'Hide experiment form' : 'Add experiment'}
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenQuickEventForm}
+            className="rounded-full border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50"
+          >
+            {showQuickEventForm ? 'Hide event form' : 'Add event'}
+          </button>
+        </div>
       </header>
 
       <div className="mt-6 max-w-sm">
@@ -530,7 +760,7 @@ function Schedule({ lab, selectedLabId }) {
       <div className="mt-8 grid gap-4 md:grid-cols-2">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-slate-500">Upcoming</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{thisWeekExperiments.length} experiments this week</p>
+          <p className="mt-2 text-lg font-semibold text-slate-900">{thisWeekExperiments.length} scheduled items this week</p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-slate-500">dates</p>
@@ -673,6 +903,130 @@ function Schedule({ lab, selectedLabId }) {
         </form>
       )}
 
+      {showQuickEventForm && (
+        <form
+          onSubmit={handleQuickEventSubmit}
+          className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Add a calendar event</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="text-sm font-medium text-slate-700 md:col-span-2">
+              Event name
+              <input
+                type="text"
+                required
+                value={quickEvent.title}
+                onChange={(event) => setQuickEvent((current) => ({ ...current, title: event.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+              />
+            </label>
+            <label className="text-sm font-medium text-slate-700 md:col-span-2">
+              Event description
+              <textarea
+                required
+                rows={3}
+                value={quickEvent.description}
+                onChange={(event) => setQuickEvent((current) => ({ ...current, description: event.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+              />
+            </label>
+            <label className="text-sm font-medium text-slate-700 md:col-span-2">
+              Equipment needed
+              <input
+                type="text"
+                value={quickEvent.tools}
+                onChange={(event) => setQuickEvent((current) => ({ ...current, tools: event.target.value }))}
+                placeholder="Separate equipment names with commas"
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+              />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Date
+              <input
+                type="date"
+                required
+                value={quickEvent.date}
+                onChange={(event) => setQuickEvent((current) => ({
+                  ...current,
+                  date: event.target.value,
+                  repeatUntil: current.repeatUntil < event.target.value
+                    ? event.target.value
+                    : current.repeatUntil,
+                }))}
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+              />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Start time
+              <input
+                type="time"
+                required
+                value={quickEvent.time}
+                onChange={(event) => setQuickEvent((current) => ({ ...current, time: event.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+              />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              End time
+              <input
+                type="time"
+                required
+                value={quickEvent.endTime}
+                onChange={(event) => setQuickEvent((current) => ({ ...current, endTime: event.target.value }))}
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+              />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Repeat
+              <select
+                value={quickEvent.repeatFrequency}
+                onChange={(event) => setQuickEvent((current) => ({
+                  ...current,
+                  repeatFrequency: event.target.value,
+                }))}
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+              >
+                <option value="never">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+            {quickEvent.repeatFrequency !== 'never' && (
+              <label className="text-sm font-medium text-slate-700">
+                Repeat until
+                <input
+                  type="date"
+                  required
+                  min={quickEvent.date}
+                  value={quickEvent.repeatUntil}
+                  onChange={(event) => setQuickEvent((current) => ({
+                    ...current,
+                    repeatUntil: event.target.value,
+                  }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-blue-500"
+                />
+              </label>
+            )}
+          </div>
+          <div className="mt-4 flex items-center justify-end gap-3">
+            {quickEventError && <p role="alert" className="mr-auto text-sm text-rose-700">{quickEventError}</p>}
+            <button
+              type="button"
+              onClick={() => setShowQuickEventForm(false)}
+              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700"
+            >
+              Add event
+            </button>
+          </div>
+        </form>
+      )}
+
       <section className="mt-8 rounded-3xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -705,7 +1059,7 @@ function Schedule({ lab, selectedLabId }) {
           </div>
         </div>
 
-        <div className="overflow-x-auto p-4 h-[80vh]">
+        <div ref={calendarViewportRef} className="overflow-x-auto p-4 h-[80vh]">
           <div className="">
             <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))] gap-1">
               <div />
@@ -752,8 +1106,11 @@ function Schedule({ lab, selectedLabId }) {
                         <button
                           type="button"
                           key={experiment.id}
+                          data-calendar-event="true"
+                          data-date={dateKey}
+                          data-time={experiment.time}
                           onClick={() => setSelectedExperiment(experiment)}
-                          aria-label={`${experiment.title}, ${formatTimeLabel(experiment.time)}${experiment.notes ? `, ${experiment.notes}` : ''}`}
+                          aria-label={`${experiment.title}, ${formatTimeLabel(experiment.time)}${experiment.description || experiment.notes ? `, ${experiment.description || experiment.notes}` : ''}`}
                           className="absolute overflow-hidden rounded-xl p-2 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-md"
                           style={{
                             top: `${Math.max(0, top)}px`,
@@ -776,8 +1133,8 @@ function Schedule({ lab, selectedLabId }) {
                             </p>
                           )}
                           {!shouldHideDetails && (
-                            <p className="mt-1 truncate text-[11px] text-slate-700/80" title={experiment.notes || 'No notes added yet.'}>
-                              {experiment.notes || 'No notes added yet.'}
+                            <p className="mt-1 truncate text-[11px] text-slate-700/80" title={experiment.description || experiment.notes || 'No notes added yet.'}>
+                              {experiment.description || experiment.notes || 'No notes added yet.'}
                             </p>
                           )}
                         </button>
@@ -795,6 +1152,7 @@ function Schedule({ lab, selectedLabId }) {
         experiment={selectedExperiment}
         onClose={() => setSelectedExperiment(null)}
         onDelete={handleDeleteExperiment}
+        onDeleteSeries={handleDeleteSeries}
       />
     </main>
   )

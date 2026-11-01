@@ -1,5 +1,26 @@
 # React + Vite
 
+## Authentication and Supabase OAuth
+
+The app includes a local demo sign-in when Supabase environment variables are
+not set. Demo credentials are not verified and must not be used as real account
+security. Passwords are never stored by the demo adapter.
+
+To enable Supabase email/password authentication and Google OAuth:
+
+1. Copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL` and
+   `VITE_SUPABASE_ANON_KEY` from your Supabase project's API settings. These
+   are public client values; never put a service-role key in the frontend.
+2. In Supabase, enable Email under Authentication providers. To enable Google,
+   enable the Google provider and provide its OAuth client ID and secret.
+3. Add `http://localhost:5173` and your deployed app URL to the Supabase
+   Authentication URL configuration. Set the Google OAuth callback URL to
+   `https://<project-ref>.supabase.co/auth/v1/callback`.
+4. Restart the Vite server after changing environment variables.
+
+All auth operations are routed through `src/auth/authClient.js`, keeping the
+UI independent of the selected auth provider.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

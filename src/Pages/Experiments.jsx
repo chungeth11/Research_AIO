@@ -1,7 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ExperimentModal from "../UIparts/ExperimentModal";
+import LabSelector from "../UIparts/LabSelector";
+import { inventoryItems as exampleInventoryItems } from "./Inventory";
+
 const experiments = [
-  {
+{
     id: 1,
     name: "GFP Expression in HEK293 Cells",
     description:
@@ -11,6 +14,10 @@ const experiments = [
       name: "Dr. Maya Patel",
       profileImageUrl: "https://i.pravatar.cc/150?img=5",
     },
+        assigned_researchers: [{
+      name: "Gabriel Velasquez"
+    },
+  ],
     isRunning: true,
     schedule: {
       startDate: "2026-10-19",
@@ -68,7 +75,7 @@ const experiments = [
       }
     ]
   },
-  {
+{
     id: 2,
     name: "siRNA Gene Knockdown Study",
     description:
@@ -78,6 +85,13 @@ const experiments = [
       name: "Jordan Lee",
       profileImageUrl: "https://i.pravatar.cc/150?img=12",
     },
+    assigned_researchers: [{
+      name: "Elijah Varela"
+    },
+    {
+      name: "Anton Wagner"
+    }
+  ],
     isRunning: false,
     schedule: null,
     notes: [
@@ -121,7 +135,7 @@ const experiments = [
       }
     ]
   },
-  {
+{
     id: 3,
     name: "Neuronal Calcium Imaging",
     description:
@@ -131,6 +145,13 @@ const experiments = [
       name: "Dr. Elena Martinez",
       profileImageUrl: "https://i.pravatar.cc/150?img=47",
     },
+        assigned_researchers: [{
+      name: "Elijah Varela"
+    },
+    {
+      name: "Anton Wagner"
+    }
+  ],
     isRunning: true,
     schedule: {
       startDate: "2026-10-15",
@@ -174,7 +195,7 @@ const experiments = [
       },
     ],
   },
-  {
+{
     id: 4,
     name: "Drug Dose-Response Assay",
     description:
@@ -184,6 +205,13 @@ const experiments = [
       name: "Sofia Martinez",
       profileImageUrl: "https://i.pravatar.cc/150?img=32",
     },
+        assigned_researchers: [{
+      name: "Elijah Varela"
+    },
+    {
+      name: "Anton Wagner"
+    }
+  ],
     isRunning: false,
     schedule: {
       startDate: "2026-09-28",
@@ -241,7 +269,7 @@ const experiments = [
       }
     ]
   },
-  {
+{
     id: 5,
     name: "Western Blot Protein Analysis",
     description:
@@ -251,6 +279,13 @@ const experiments = [
       name: "Alex Kim",
       profileImageUrl: "https://i.pravatar.cc/150?img=11",
     },
+        assigned_researchers: [{
+      name: "Elijah Varela"
+    },
+    {
+      name: "Anton Wagner"
+    }
+  ],
     isRunning: false,
     schedule: {
       startDate: "2026-10-10",
@@ -308,7 +343,7 @@ const experiments = [
       }
     ]
   },
-  {
+{
     id: 6,
     name: "CRISPR-Cas9 Gene Knockout",
     description:
@@ -318,6 +353,13 @@ const experiments = [
       name: "Dr. Daniel Brooks",
       profileImageUrl: "https://i.pravatar.cc/150?img=53",
     },
+        assigned_researchers: [{
+      name: "Elijah Varela"
+    },
+    {
+      name: "Anton Wagner"
+    }
+  ],
     isRunning: false,
     schedule: null,
     notes: [
@@ -352,8 +394,13 @@ const experiments = [
         url: "/attachments/target-gene-sequence.fasta",
       },
     ],
-  },
+  }
 ];
+import {
+  calculateSupplyInventory,
+  getInventoryStorageKey,
+  reconcileSupplyInventory,
+} from "../utils/inventory";
 
 function formatDate(date) {
   if (!date) return "Ongoing";
@@ -366,13 +413,35 @@ function formatDate(date) {
   }).format(new Date(`${date}T00:00:00Z`));
 }
 
+function formatScheduledDates(schedule) {
+  if (schedule?.events?.length) {
+    const visibleEvents = schedule.events.slice(0, 3).map((event) =>
+      `${formatDate(event.date)}${event.time ? ` ${event.time}` : ""}${event.endTime ? `–${event.endTime}` : ""}`,
+    ).join(", ");
+    const remainingEvents = schedule.events.length - 3;
+    return remainingEvents > 0
+      ? `${visibleEvents} + ${remainingEvents} more`
+      : visibleEvents;
+  }
+
+  if (schedule?.dates?.length) {
+    const visibleDates = schedule.dates.slice(0, 3).map(formatDate).join(", ");
+    const remainingDates = schedule.dates.length - 3;
+    return remainingDates > 0
+      ? `${visibleDates} + ${remainingDates} more`
+      : visibleDates;
+  }
+
+  return `${formatDate(schedule?.startDate)} – ${formatDate(schedule?.endDate)}`;
+}
+
 function parseAmount(amount) {
-  const match = amount.match(/^\s*([\d,]+(?:\.\d+)?)\s*([a-zA-Zµμ]+)\s*$/);
-  if (!match) return null;
+  const match = String(amount ?? "").match(/^\s*([\d,]+(?:\.\d+)?)\s*(.*?)\s*$/);
+  if (!match?.[2]) return null;
 
   return {
     quantity: Number(match[1].replaceAll(",", "")),
-    unit: match[2].toLowerCase(),
+    unit: match[2].replace(/[µμ]/g, "u").trim().toLowerCase(),
   };
 }
 
@@ -411,14 +480,60 @@ function readFileAsDataUrl(file, index) {
   });
 }
 
-function Experiments({ lab }) {
-  const [experimentList, setExperimentList] = useState(lab.id === 1 ? experiments : []);
+function Experiments({
+  lab,
+  selectedLabId,
+  onSelectedLabChange,
+  onCalendarNavigate,
+  onInventoryNavigate,
+}) {
+  const experimentRecordsStorageKey = `research-aio-experiment-records-lab-${selectedLabId}`;
+  const [inventoryItems] = useState(() => {
+    try {
+      const savedInventory = window.localStorage.getItem(
+        getInventoryStorageKey(selectedLabId),
+      );
+      return savedInventory
+        ? JSON.parse(savedInventory)
+        : (selectedLabId === 1 ? exampleInventoryItems : []);
+    } catch (error) {
+      console.error("Could not load inventory for experiment requirements:", error);
+      return (selectedLabId === 1 ? exampleInventoryItems : []);
+    }
+  });
+  const [experimentList, setExperimentList] = useState(() => {
+    try {
+      const savedExperiments = window.localStorage.getItem(experimentRecordsStorageKey);
+      const loadedExperiments = savedExperiments
+        ? JSON.parse(savedExperiments)
+        : (selectedLabId === 1 ? experiments : []);
+      const savedInventory = window.localStorage.getItem(
+        getInventoryStorageKey(selectedLabId),
+      );
+      if (!savedInventory) return loadedExperiments;
+
+      const savedLedger = window.localStorage.getItem(
+        `research-aio-supply-consumption-lab-${selectedLabId}`,
+      );
+      return calculateSupplyInventory(
+        JSON.parse(savedInventory),
+        loadedExperiments,
+        savedLedger ? JSON.parse(savedLedger) : {},
+      ).experiments;
+    } catch (error) {
+      console.error("Could not load experiment records:", error);
+      return (selectedLabId === 1 ? experiments : []);
+    }
+  });
   const [selectedExperimentId, setSelectedExperimentId] = useState(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteFiles, setNoteFiles] = useState([]);
+  const [showExperimentDetails, setShowExperimentDetails] = useState(false);
   const [isExperimentModalOpen, setIsExperimentModalOpen] = useState(false);
   const [experimentToEdit, setExperimentToEdit] = useState(null);
+  const [newExperimentId, setNewExperimentId] = useState(null);
   const noteFileInputRef = useRef(null);
+  const attachmentFileInputRef = useRef(null);
   const selectedExperiment = experimentList.find(
     (experiment) => experiment.id === selectedExperimentId,
   ) ?? null;
@@ -437,27 +552,57 @@ function Experiments({ lab }) {
         ? "Check quantities"
         : "Not recorded";
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        experimentRecordsStorageKey,
+        JSON.stringify(experimentList),
+      );
+    } catch (error) {
+      console.error("Could not save experiment records:", error);
+    }
+  }, [experimentList, experimentRecordsStorageKey]);
+
+  useEffect(() => {
+    try {
+      reconcileSupplyInventory(selectedLabId, experimentList);
+    } catch (error) {
+      console.error("Could not reconcile experiment supply usage:", error);
+    }
+  }, [experimentList, selectedLabId]);
+
   function openAddExperimentModal() {
     setExperimentToEdit(null);
+    setNewExperimentId(Date.now());
     setIsExperimentModalOpen(true);
   }
 
-  function openEditExperimentModal() {
-    setExperimentToEdit(selectedExperiment);
+  function openEditExperimentModal(experiment) {
+    setExperimentToEdit(experiment);
     setIsExperimentModalOpen(true);
   }
 
   function handleSaveExperiment(updatedExperiment) {
-    setExperimentList((currentExperiments) =>
-      experimentToEdit
-        ? currentExperiments.map((experiment) =>
-            experiment.id === updatedExperiment.id
-              ? updatedExperiment
-              : experiment,
-          )
-        : [...currentExperiments, updatedExperiment],
-    );
-    setSelectedExperimentId(updatedExperiment.id);
+    const updatedExperiments = experimentToEdit
+      ? experimentList.map((experiment) =>
+          experiment.id === updatedExperiment.id
+            ? updatedExperiment
+            : experiment,
+        )
+      : [...experimentList, updatedExperiment];
+    let reconciledExperiments = updatedExperiments;
+    try {
+      const reconciliation = reconcileSupplyInventory(
+        selectedLabId,
+        updatedExperiments,
+      );
+      if (reconciliation) {
+        reconciledExperiments = reconciliation.experiments;
+      }
+    } catch (error) {
+      console.error("Could not reconcile experiment supply usage:", error);
+    }
+    setExperimentList(reconciledExperiments);
     setIsExperimentModalOpen(false);
     setExperimentToEdit(null);
   }
@@ -492,22 +637,71 @@ function Experiments({ lab }) {
     if (noteFileInputRef.current) noteFileInputRef.current.value = "";
   }
 
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto grid lg:grid-cols-3 lg:grid-rows-1 lg:overflow-hidden">
+  async function handleAddAttachments(event) {
+    const files = Array.from(event.target.files ?? []);
+    if (!selectedExperiment || files.length === 0) return;
 
-    <div className="min-w-0 flex-none p-4 text-slate-900 sm:p-8 lg:col-span-2 lg:min-h-0 lg:overflow-y-auto">
+    let attachments;
+    try {
+      attachments = await Promise.all(files.map(readFileAsDataUrl));
+    } catch (error) {
+      window.alert(error.message);
+      event.target.value = "";
+      return;
+    }
+
+    setExperimentList((currentExperiments) =>
+      currentExperiments.map((experiment) =>
+        experiment.id === selectedExperiment.id
+          ? {
+              ...experiment,
+              attachments: [...(experiment.attachments ?? []), ...attachments],
+            }
+          : experiment,
+      ),
+    );
+    event.target.value = "";
+  }
+
+  function handleRemoveAttachment(attachmentId) {
+    if (!selectedExperiment) return;
+
+    setExperimentList((currentExperiments) =>
+      currentExperiments.map((experiment) =>
+        experiment.id === selectedExperiment.id
+          ? {
+              ...experiment,
+              attachments: (experiment.attachments ?? []).filter(
+                (attachment) => attachment.id !== attachmentId,
+              ),
+            }
+          : experiment,
+      ),
+    );
+  }
+
+  return (
+    <div className="h-full min-h-0 overflow-y-auto">
+
+    <div className={`min-w-0 p-4 text-slate-900 sm:p-8 ${showExperimentDetails ? "hidden" : ""}`}>
       <div className="mb-4 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Experiments</h1>
           <p className="mt-1 text-sm text-slate-500">{lab.name}</p>
         </div>
-        <button
-          type="button"
-          onClick={openAddExperimentModal}
-          className="shrink-0 rounded-3xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-        >
-          Add
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <LabSelector
+            selectedLabId={selectedLabId}
+            onSelectedLabChange={onSelectedLabChange}
+          />
+          <button
+            type="button"
+            onClick={openAddExperimentModal}
+            className="shrink-0 rounded-3xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            Add
+          </button>
+        </div>
       </div>
       {experimentList.length === 0 && (
         <p className="mt-4 rounded-lg bg-white p-4 text-sm text-slate-600">
@@ -534,7 +728,10 @@ function Experiments({ lab }) {
           return (
             <button
               type="button"
-              onClick={() => setSelectedExperimentId(experiment.id)}
+              onClick={() => {
+                setSelectedExperimentId(experiment.id);
+                setShowExperimentDetails(true);
+              }}
               key={experiment.id}
               id={`experiment-${experiment.id}`}
               className="rounded-lg bg-white p-4 text-left shadow-md transition-colors hover:bg-gray-100"
@@ -556,39 +753,64 @@ function Experiments({ lab }) {
                   {experimentSupplyStatus}
                 </span>
               </div>
-
+                  <div className = "flex">
               <p className="mb-2 text-start text-gray-600">
                 Leader: {experiment.leader.name}
               </p>
+              {experiment.assigned_researchers?.map((researcher) => (
+                <p
+                  key={researcher.name}
+                  className="mb-2 pl-2 text-start text-gray-600"
+                >
+                  Assigned Researcher: {researcher.name}
+                </p>
+              ))}
+
+                  </div>
               <p className="mb-2 text-start text-gray-600">
                 Details: {experiment.description}
               </p>
+              {(experiment.calendarSchedule || experiment.schedule) && (
+                <p className="text-sm font-medium text-blue-700">
+                  Calendar: {formatScheduledDates(
+                    experiment.calendarSchedule || experiment.schedule,
+                  )}
+                </p>
+              )}
             </button>
           );
         })}
       </div>
     </div>
-    {/* all the right sidebar stuff */}
-    <aside
+    <section
       aria-label="Experiment details"
-      className="min-w-0 flex-none border-t border-slate-200 bg-slate-50 p-4 text-slate-900 sm:p-6 lg:col-span-1 lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
+      className={`min-w-0 p-4 text-slate-900 sm:p-8 ${showExperimentDetails ? "" : "hidden"}`}
     >
-      {selectedExperiment ? (
-        <div className="mx-auto max-w-xl space-y-5">
+      {selectedExperiment && showExperimentDetails ? (
+        <div className="mx-auto w-full space-y-5">
           <div className="flex items-center justify-between border-b border-slate-200 pb-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-500">
                 Experiment overview
               </p>
-              <h2 className="mt-1 text-sm font-semibold text-slate-800">Details</h2>
+              <h2 className="mt-1 text-xl font-bold text-slate-900">Experiment details</h2>
             </div>
-            <button
-              type="button"
-              onClick={openEditExperimentModal}
-              className="rounded-full bg-blue-500 px-4 py-2 text-xs font-medium text-white ring-1 ring-slate-200 transition hover:bg-blue-700"
-            >
-             edit
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowExperimentDetails(false)}
+                className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+              >
+                Back to experiments
+              </button>
+              <button
+                type="button"
+                onClick={() => openEditExperimentModal(selectedExperiment)}
+                className="rounded-full bg-blue-500 px-4 py-2 text-sm font-semibold text-white ring-1 ring-slate-200 transition hover:bg-blue-700"
+              >
+                Edit
+              </button>
+            </div>
           </div>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -645,14 +867,18 @@ function Experiments({ lab }) {
               <ul className="mt-4 divide-y divide-slate-100">
                 {supplyAvailability.map((resource) => (
                   <li key={resource.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => onInventoryNavigate?.(resource.name)}
+                      className="min-w-0 text-left group"
+                    >
+                      <span className="block truncate text-sm font-medium text-blue-700 group-hover:underline">
                         {resource.name}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      </span>
+                      <span className="mt-1 block text-xs text-slate-500">
                         {resource.Amount_Left} available · {resource.Amount_needed} needed
-                      </p>
-                    </div>
+                      </span>
+                    </button>
                     <span
                       className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${
                         resource.enough === true
@@ -693,11 +919,35 @@ function Experiments({ lab }) {
             </div>
             <div className="mt-4 border-t border-slate-100 pt-4">
               <p className="text-xs text-slate-500">Schedule</p>
-              <p className="mt-1 text-sm font-medium text-slate-800">
-                {selectedExperiment.schedule
-                  ? `${formatDate(selectedExperiment.schedule.startDate)} – ${formatDate(selectedExperiment.schedule.endDate)}`
-                  : "Not scheduled"}
-              </p>
+              {selectedExperiment.calendarSchedule?.events?.length ? (
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {selectedExperiment.calendarSchedule.events.slice(0, 5).map((event, index) => (
+                    <li key={`${event.date}-${event.time}-${index}`}>
+                      <button
+                        type="button"
+                        onClick={() => onCalendarNavigate?.(event.date, event.time)}
+                        className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {formatDate(event.date)}
+                        {event.time && ` · ${event.time}`}
+                        {event.endTime && `–${event.endTime}`}
+                        <span className="sr-only">, open in calendar</span>
+                      </button>
+                    </li>
+                  ))}
+                  {selectedExperiment.calendarSchedule.events.length > 5 && (
+                    <li className="self-center px-1 text-sm font-medium text-slate-500">
+                      +{selectedExperiment.calendarSchedule.events.length - 5} more
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm font-medium text-slate-800">
+                  {selectedExperiment.schedule
+                    ? formatScheduledDates(selectedExperiment.schedule)
+                    : "Not scheduled"}
+                </p>
+              )}
             </div>
           </section>
 
@@ -720,20 +970,54 @@ function Experiments({ lab }) {
             </div>
           </section>
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Attachments
-            </h3>
-            <div className="mt-4 space-y-2">
-              {selectedExperiment.attachments.map((attachment) => (
-                <a
-                  key={attachment.id}
-                  href={attachment.url}
-                  className="block rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-100"
-                >
-                  {attachment.name} ({attachment.type})
-                </a>
-              ))}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Attachments
+              </h3>
+              <input
+                ref={attachmentFileInputRef}
+                type="file"
+                multiple
+                onChange={handleAddAttachments}
+                className="hidden"
+                aria-label="Choose experiment attachments"
+              />
+              <button
+                type="button"
+                onClick={() => attachmentFileInputRef.current?.click()}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                Add attachment
+              </button>
             </div>
+            {(selectedExperiment.attachments ?? []).length ? (
+              <ul className="mt-4 space-y-2">
+                {(selectedExperiment.attachments ?? []).map((attachment) => (
+                  <li
+                    key={attachment.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2"
+                  >
+                    <a
+                      href={attachment.url}
+                      download={attachment.name}
+                      className="min-w-0 break-all text-sm font-medium text-slate-800 hover:text-blue-700"
+                    >
+                      {attachment.name} ({attachment.type})
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(attachment.id)}
+                      aria-label={`Remove ${attachment.name}`}
+                      className="shrink-0 text-md font-semibold text-slate-600 hover:text-black -mt-1"
+                    >
+                      x
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm text-slate-500">No attachments yet.</p>
+            )}
           </section >
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm max-h-2/3">
             <div className="flex items-center justify-between gap-3">
@@ -857,34 +1141,14 @@ function Experiments({ lab }) {
 
         </div>
       ) : (
-        <div className="flex min-h-64 flex-col items-center justify-center py-12 text-center lg:min-h-full">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-            <svg
-              aria-hidden="true"
-              className="h-7 w-7"
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="1.7"
-              viewBox="0 0 24 24"
-            >
-              <path d="M9 3h6M10 3v6.5l-5.1 8.1A2.3 2.3 0 0 0 6.8 21h10.4a2.3 2.3 0 0 0 1.9-3.4L14 9.5V3" />
-              <path d="M8 15h8" />
-            </svg>
-          </div>
-          <h2 className="mt-4 text-base font-semibold text-slate-800">
-            Your experiment details
-          </h2>
-          <p className="mt-2 max-w-xs text-sm leading-6 text-slate-500">
-            Select an experiment from the list to see its status, schedule, and resources.
-          </p>
-        </div>
+        null
       )}
-    </aside>
+    </section>
     {isExperimentModalOpen && (
       <ExperimentModal
         experiment={experimentToEdit}
+        newExperimentId={newExperimentId}
+        inventoryItems={inventoryItems}
         onClose={() => {
           setIsExperimentModalOpen(false);
           setExperimentToEdit(null);

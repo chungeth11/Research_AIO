@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
-
-const initialProfile = {
+const profileExample = {
   id: 1,
   name: "Dr. Maya Patel",
   email: "maya.patel@helix.edu",
@@ -41,6 +40,7 @@ const initialProfile = {
   ],
 };
 
+
 function formatDate(date) {
   return new Intl.DateTimeFormat("en", {
     month: "long",
@@ -51,7 +51,7 @@ function formatDate(date) {
 }
 
 function Profile() {
-  const [profile, setProfile] = useState(initialProfile);
+  const [profile, setProfile] = useState(() => profileExample);
   const [isEditing, setIsEditing] = useState(false);
   const [resumeError, setResumeError] = useState("");
   const resumeInputRef = useRef(null);

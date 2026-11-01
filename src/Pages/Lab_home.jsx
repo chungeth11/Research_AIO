@@ -1,8 +1,10 @@
 import { useState } from "react";
 import CertificationsTrainingModal from "../UIparts/CertificationsTrainingModal";
+import LabSelector from "../UIparts/LabSelector";
 import { labs } from "./Labs";
 
-const lab = {
+const labHomeExamples = {
+  1: {
   organization: {
     name: "Helix Research Institute",
     organizationImageUrl: "https://placehold.co/150x150?text=HRI",
@@ -155,10 +157,7 @@ const lab = {
       url: "#",
     },
   ],
-};
-
-const labHomeContent = {
-  1: lab,
+},
   2: {
     announcements: [
       {
@@ -323,14 +322,18 @@ const labHomeContent = {
       { id: 1, name: "Confocal Microscope Operation", completed: 6, total: 7 },
       { id: 2, name: "Laser Safety", completed: 7, total: 7 },
     ],
-  },
+  }
 };
+
+
+
 
 function Lab_home({ selectedLabId, onSelectedLabChange }) {
   const [isComplianceModalOpen, setIsComplianceModalOpen] = useState(false);
   const [complianceUploads, setComplianceUploads] = useState({});
   const selectedLab = labs.find(({ id }) => id === selectedLabId) ?? labs[0];
-  const selectedLabContent = labHomeContent[selectedLab.id] ?? lab;
+  const selectedLabContent = labHomeExamples[selectedLab.id]
+    ?? labHomeExamples[labs[0].id];
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 text-slate-900">
@@ -360,21 +363,10 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
             </div>
           </div>
           <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="text-sm font-medium text-slate-700">
-              <span className="sr-only">Choose lab to view</span>
-              <select
-                aria-label="Choose lab to view"
-                value={selectedLabId}
-                onChange={(event) => onSelectedLabChange(Number(event.target.value))}
-                className="max-w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              >
-                {labs.map((availableLab) => (
-                  <option key={availableLab.id} value={availableLab.id}>
-                    {availableLab.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <LabSelector
+              selectedLabId={selectedLabId}
+              onSelectedLabChange={onSelectedLabChange}
+            />
             <button
               type="button"
               onClick={() => setIsComplianceModalOpen(true)}

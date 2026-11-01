@@ -5,6 +5,7 @@ function ItemModal({ item, onClose, onSave }) {
   const imageInputRef = useRef(null);
   const [draft, setDraft] = useState(() => ({
     ...item,
+    category: item.category ?? "Supply",
     location: { ...item.location },
     amount: { ...item.amount },
     experimentsUsedIn: item.experimentsUsedIn.join(", "),
@@ -167,6 +168,18 @@ function ItemModal({ item, onClose, onSave }) {
                 required
                 className={inputClassName}
               />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Type</span>
+              <select
+                name="category"
+                value={draft.category}
+                onChange={updateItemField}
+                className={inputClassName}
+              >
+                <option value="Supply">Supply</option>
+                <option value="Equipment">Equipment</option>
+              </select>
             </label>
             <label className="block">
               <span className="text-sm font-medium text-slate-700">Description</span>

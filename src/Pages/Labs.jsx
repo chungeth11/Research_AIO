@@ -1,11 +1,8 @@
 import { useState } from "react";
 import ApplyModal from "../UIparts/ApplyModal";
-
-
-// Shared with Lab Home so its selector uses the same directory entries.
 // eslint-disable-next-line react-refresh/only-export-components
 export const labs = [
-  {
+{
     id: 1,
     name: "Martinez Neural Plasticity Lab",
     organization: "Helix Research Institute",
@@ -71,8 +68,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=HRI",
       "Flexible work scheduling",
     ],
   },
-
-  {
+{
     id: 2,
     name: "Chen Molecular Therapeutics Lab",
     organization: "Pacific Biomedical Center",
@@ -138,8 +134,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=PBC",
       "Hybrid work options for computational roles",
     ],
   },
-
-  {
+{
     id: 3,
     name: "Brooks Genome Engineering Lab",
     organization: "North Valley University",
@@ -186,8 +181,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=NVU",
       "Employee wellness program",
     ],
   },
-
-  {
+{
     id: 4,
     name: "Rivera Metabolic Disease Lab",
     type: "psychology",
@@ -213,8 +207,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=CHSU",
       "Access to university research facilities",
     ],
   },
-
-  {
+{
     id: 5,
     name: "Patel Cellular Imaging Lab",
     type: "femboy and christian studies",
@@ -260,20 +253,59 @@ organizationImageUrl: "https://placehold.co/150x150?text=ECMI",
       "Professional certification funding",
       "Flexible scheduling",
     ],
-  },
+  }
 ];
+
 function Labs() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedLabId, setSelectedLabId] = useState(null);
   const [applicationPosition, setApplicationPosition] = useState(null);
+  const [directoryView, setDirectoryView] = useState("labs");
+  const [initialSavedJobs] = useState(() => {
+    try {
+      const savedJobs = JSON.parse(
+        window.localStorage.getItem("research-aio-saved-jobs") ?? "[]",
+      );
+      if (!Array.isArray(savedJobs) || !savedJobs.every((key) => typeof key === "string")) {
+        throw new Error("Saved job data is not in the expected format.");
+      }
+      return { keys: savedJobs, error: "" };
+    } catch (error) {
+      return { keys: [], error: `Could not load saved jobs: ${error.message}` };
+    }
+  });
+  const [savedJobKeys, setSavedJobKeys] = useState(initialSavedJobs.keys);
+  const [savedJobsError, setSavedJobsError] = useState(initialSavedJobs.error);
   const selectedLab = labs.find((lab) => lab.id === selectedLabId);
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+  const savedJobs = labs.flatMap((lab) =>
+    lab.hiringPositions
+      .filter((position) => savedJobKeys.includes(`${lab.id}-${position.id}`))
+      .map((position) => ({ lab, position, key: `${lab.id}-${position.id}` })),
+  );
   const filteredLabs = labs.filter((lab) =>
     [lab.name, lab.description, lab.location.institution, lab.location.city, lab.location.state]
       .join(" ")
       .toLowerCase()
       .includes(normalizedSearchTerm),
   );
+
+  function toggleSavedJob(labId, positionId) {
+    const key = `${labId}-${positionId}`;
+    const updatedSavedJobKeys = savedJobKeys.includes(key)
+      ? savedJobKeys.filter((savedKey) => savedKey !== key)
+      : [...savedJobKeys, key];
+    setSavedJobKeys(updatedSavedJobKeys);
+    try {
+      window.localStorage.setItem(
+        "research-aio-saved-jobs",
+        JSON.stringify(updatedSavedJobKeys),
+      );
+      setSavedJobsError("");
+    } catch (error) {
+      setSavedJobsError(`Could not save your saved jobs: ${error.message}`);
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-slate-50 text-slate-900 md:flex-row">
@@ -289,6 +321,30 @@ function Labs() {
           <p className="mt-1 text-sm text-slate-500">
             Browse research teams and opportunities.
           </p>
+          <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => setDirectoryView("labs")}
+              aria-pressed={directoryView === "labs"}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                directoryView === "labs" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Labs
+            </button>
+            <button
+              type="button"
+              onClick={() => setDirectoryView("saved")}
+              aria-pressed={directoryView === "saved"}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                directoryView === "saved" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Saved jobs ({savedJobs.length})
+            </button>
+          </div>
+          {directoryView === "labs" && (
+            <>
           <label htmlFor="lab-search" className="sr-only">
             Search labs
           </label>
@@ -318,7 +374,15 @@ function Labs() {
           <p className="mt-3 text-xs font-medium text-slate-400">
             {filteredLabs.length} {filteredLabs.length === 1 ? "lab" : "labs"}
           </p>
+            </>
+          )}
+          {savedJobsError && (
+            <p role="alert" className="mt-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">
+              {savedJobsError}
+            </p>
+          )}
         </div>
+        {directoryView === "labs" ? (
         <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
           {filteredLabs.map((lab) => (
             <li key={lab.id}>
@@ -374,6 +438,44 @@ function Labs() {
             </li>
           )}
         </ul>
+        ) : (
+          <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+            {savedJobs.map(({ lab, position, key }) => (
+              <li key={key}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLabId(lab.id)}
+                  className={`w-full rounded-xl border p-3 text-left transition ${
+                    selectedLabId === lab.id
+                      ? "border-blue-200 bg-blue-50 shadow-sm"
+                      : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <div className = " flex justify-between">
+                    <span className="block text-sm font-semibold text-slate-800">{position.title}</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleSavedJob(lab.id, position.id)}
+                      aria-label={`Remove ${position.title} from saved jobs`}
+                      className="-mt-1.5 px-3 text-left text-lg font-semibold text-slate-600 hover:text-black"
+                    >
+                  x
+                </button>
+                  </div>
+                  <span className="mt-1 block text-xs text-slate-500">{lab.name}</span>
+                  <span className="mt-1 block text-xs text-slate-400">{position.employmentType}</span>
+                </button>
+
+              </li>
+            ))}
+            {savedJobs.length === 0 && (
+              <li className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center">
+                <p className="text-sm font-medium text-slate-700">No saved jobs yet</p>
+                <p className="mt-1 text-xs text-slate-500">Save a role from a lab to find it here.</p>
+              </li>
+            )}
+          </ul>
+        )}
       </aside>
 
       <section
@@ -506,6 +608,20 @@ function Labs() {
                           Open role
                         </span>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleSavedJob(selectedLab.id, position.id)}
+                        aria-pressed={savedJobKeys.includes(`${selectedLab.id}-${position.id}`)}
+                        className={`mt-4 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                          savedJobKeys.includes(`${selectedLab.id}-${position.id}`)
+                            ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {savedJobKeys.includes(`${selectedLab.id}-${position.id}`)
+                          ? "Saved"
+                          : "Save job"}
+                      </button>
                       <p className="mt-4 text-sm leading-6 text-slate-600">
                         {position.description}
                       </p>

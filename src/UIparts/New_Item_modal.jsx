@@ -3,6 +3,7 @@ import Modal from "./Modal";
 
 const emptyItem = {
   name: "",
+  category: "Supply",
   description: "",
   price: "",
   building: "",
@@ -62,6 +63,7 @@ function NewItemModal({ onClose, onSave }) {
     onSave({
       id: Date.now(),
       name: draft.name.trim(),
+      category: draft.category,
       imageUrl,
       description: draft.description.trim(),
       price,
@@ -170,6 +172,18 @@ function NewItemModal({ onClose, onSave }) {
                 required
                 className={inputClassName}
               />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Type</span>
+              <select
+                name="category"
+                value={draft.category}
+                onChange={updateField}
+                className={inputClassName}
+              >
+                <option value="Supply">Supply</option>
+                <option value="Equipment">Equipment</option>
+              </select>
             </label>
             <label className="block">
               <span className="text-sm font-medium text-slate-700">

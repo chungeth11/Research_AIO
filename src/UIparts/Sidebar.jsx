@@ -1,4 +1,13 @@
 const tabs = [
+    {
+    name: 'Labs',
+    icon: (
+      <>
+        <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6" />
+        <path d="M8 10h.01M12 10h.01M16 10h.01" />
+      </>
+    ),
+  },
 {
     name: 'Lab_home',
     icon: (
@@ -7,6 +16,7 @@ const tabs = [
       </>
     ),
   },
+
     {
     name: 'Schedule',
     icon: (
@@ -39,6 +49,15 @@ const tabs = [
     ),
   },
   // {
+  //   name: 'ELN',
+  //   icon: (
+  //     <>
+  //       <path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+  //       <path d="M14 3v5h5M8 12h8M8 16h8" />
+  //     </>
+  //   ),
+  // },
+  // {
   //   name: 'Data',
   //   icon: (
   //     <>
@@ -58,24 +77,25 @@ const tabs = [
       </>
     ),
   },
+  {
+    name: 'Settings',
+    icon: (
+      <>
+        <path d="M4 7h7m4 0h5M4 17h3m4 0h9" />
+        <circle cx="13" cy="7" r="2" />
+        <circle cx="9" cy="17" r="2" />
+      </>
+    ),
+  },
 
 ]
 
-function Sidebar({ activeTab, onTabChange, onLogoClick }) {
+function Sidebar({ activeTab, onTabChange, userEmail, onLogout }) {
   return (
-    <aside className="h-screen w-20 shrink-0 overflow-y-auto border-r border-gray-800 bg-gray-400 text-white">
-      <div className="p-3">
-        <button
-          type="button"
-          onClick={onLogoClick}
-          aria-label="Open Labs"
-          title="Labs"
-          className=" w-full bg-slate-300 pt-3 rounded-3xl text-blue-400 pb-3 text-center text-xl font-bold transition hover:text-blue-600 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-        >
-          D
-        </button>
+    <aside className="flex h-screen w-20 shrink-0 flex-col overflow-y-auto border-r border-gray-800 bg-gray-400 text-white">
+      <div className="pl-3 pr-3 pt-3">
         <nav aria-label="Main navigation">
-          <ul className="mt-4 space-y-2">
+          <ul className="space-y-2">
             {tabs.map(({ name, icon }) => (
               <li key={name}>
                 <button
@@ -105,6 +125,29 @@ function Sidebar({ activeTab, onTabChange, onLogoClick }) {
             ))}
           </ul>
         </nav>
+      </div>
+      <div className="mt-auto px-3 pb-3">
+        <button
+          type="button"
+          onClick={onLogout}
+          aria-label={`Sign out${userEmail ? ` (${userEmail})` : ''}`}
+          title={`Sign out${userEmail ? `: ${userEmail}` : ''}`}
+          className="flex w-full justify-center rounded-lg p-3 text-gray-400 transition-colors hover:bg-gray-200 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        >
+          <svg
+            aria-hidden="true"
+            className="h-8 w-8 rounded-full bg-blue-500 p-1"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+            viewBox="0 0 24 24"
+          >
+            <path d="M10 17l5-5-5-5M15 12H3" />
+            <path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" />
+          </svg>
+        </button>
       </div>
     </aside>
   )

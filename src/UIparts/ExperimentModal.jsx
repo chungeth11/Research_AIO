@@ -1,12 +1,60 @@
 import { useState } from "react";
 import Modal from "./Modal";
 
-function getInitialDraft(experiment) {
+function parseAmount(value) {
+  const match = String(value ?? "").match(/^\s*([\d,]+(?:\.\d+)?)\s*(.*?)\s*$/);
+  if (!match?.[2]) return null;
+  return {
+    quantity: Number(match[1].replaceAll(",", "")),
+    unit: match[2],
+  };
+}
+
+function getInitialDraft(experiment, inventoryItems) {
+  const supplies = inventoryItems.filter((item) => (item.category ?? "Supply") === "Supply");
+  const equipment = inventoryItems.filter((item) => item.category === "Equipment");
+  const selectedSupplyIds = [];
+  const supplyAmounts = {};
+  const retainedResources = [];
+
+  (experiment?.Resources_Needed ?? []).forEach((resource) => {
+    const inventoryItem = supplies.find(
+      (item) => item.name.trim().toLowerCase() === String(resource.name).trim().toLowerCase(),
+    );
+    const amount = parseAmount(resource.Amount_needed);
+    if (!inventoryItem || !amount) {
+      retainedResources.push(resource);
+      return;
+    }
+
+    const itemId = String(inventoryItem.id);
+    if (!selectedSupplyIds.includes(itemId)) selectedSupplyIds.push(itemId);
+    supplyAmounts[itemId] = (Number(supplyAmounts[itemId]) || 0) + amount.quantity;
+  });
+
+  const existingTools = (Array.isArray(experiment?.tools)
+    ? experiment.tools
+    : String(experiment?.tools ?? "").split(",")
+  ).map((tool) => String(tool).trim()).filter(Boolean);
+  const selectedEquipmentIds = equipment
+    .filter((item) => existingTools.some(
+      (tool) => tool.toLowerCase() === item.name.trim().toLowerCase(),
+    ))
+    .map((item) => String(item.id));
+  const additionalEquipment = existingTools.filter(
+    (tool) => !equipment.some((item) => item.name.trim().toLowerCase() === tool.toLowerCase()),
+  );
+
   return {
     name: experiment?.name ?? "",
     description: experiment?.description ?? "",
     status: experiment?.status ?? "Planned",
     leader: experiment?.leader?.name ?? "",
+    selectedSupplyIds,
+    supplyAmounts,
+    retainedResources,
+    selectedEquipmentIds,
+    additionalEquipment: additionalEquipment.join(", "),
     startDate: experiment?.schedule?.startDate ?? "",
     endDate: experiment?.schedule?.endDate ?? "",
     protocolName: experiment?.protocol?.name ?? "",
@@ -15,12 +63,38 @@ function getInitialDraft(experiment) {
   };
 }
 
-function ExperimentModal({ experiment, onClose, onSave }) {
-  const [draft, setDraft] = useState(() => getInitialDraft(experiment));
+function ExperimentModal({
+  experiment,
+  newExperimentId,
+  inventoryItems,
+  onClose,
+  onSave,
+}) {
+  const supplies = inventoryItems.filter((item) => (item.category ?? "Supply") === "Supply");
+  const equipment = inventoryItems.filter((item) => item.category === "Equipment");
+  const [draft, setDraft] = useState(() => getInitialDraft(experiment, inventoryItems));
 
   function updateField(event) {
     const { name, value } = event.target;
     setDraft((currentDraft) => ({ ...currentDraft, [name]: value }));
+  }
+
+  function toggleInventorySelection(field, id) {
+    const itemId = String(id);
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: currentDraft[field].includes(itemId)
+        ? currentDraft[field].filter((selectedId) => selectedId !== itemId)
+        : [...currentDraft[field], itemId],
+    }));
+  }
+
+  function updateSupplyAmount(id, quantity) {
+    const itemId = String(id);
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      supplyAmounts: { ...currentDraft.supplyAmounts, [itemId]: quantity },
+    }));
   }
 
   function handleSubmit(event) {
@@ -33,10 +107,34 @@ function ExperimentModal({ experiment, onClose, onSave }) {
 
     onSave({
       ...experiment,
-      id: experiment?.id ?? Date.now(),
+      id: experiment?.id ?? newExperimentId,
       name: draft.name.trim(),
       description: draft.description.trim(),
       status,
+      tools: [
+        ...equipment
+          .filter((item) => draft.selectedEquipmentIds.includes(String(item.id)))
+          .map((item) => item.name.trim()),
+        ...draft.additionalEquipment
+        .split(",")
+        .map((tool) => tool.trim())
+        .filter(Boolean)
+      ].filter((tool, index, tools) =>
+        tools.findIndex((candidate) => candidate.toLowerCase() === tool.toLowerCase()) === index,
+      ).join(", "),
+      Resources_Needed: [
+        ...draft.retainedResources,
+        ...supplies
+          .filter((item) => draft.selectedSupplyIds.includes(String(item.id)))
+          .map((item) => ({
+            id: (experiment?.Resources_Needed ?? []).find(
+              (resource) => resource.name.trim().toLowerCase() === item.name.trim().toLowerCase(),
+            )?.id ?? item.id,
+            name: item.name,
+            Amount_Left: `${item.amount.quantity} ${item.amount.unit}`,
+            Amount_needed: `${Number(draft.supplyAmounts[item.id] ?? 0)} ${item.amount.unit}`,
+          })),
+      ],
       leader: {
         ...experiment?.leader,
         name: draft.leader.trim(),
@@ -155,6 +253,93 @@ function ExperimentModal({ experiment, onClose, onSave }) {
               className={inputClassName}
             />
           </label>
+          <label className="block sm:col-span-2">
+            <span className="text-sm font-medium text-slate-700">Supplies needed</span>
+            {supplies.length === 0 ? (
+              <p className="mt-1 text-sm text-slate-500">
+                No supplies in this lab&apos;s inventory yet. Add them in Inventory before selecting them here.
+              </p>
+            ) : (
+              <div className="mt-2 max-h-48 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                {supplies.map((item) => {
+                  const itemId = String(item.id);
+                  const isSelected = draft.selectedSupplyIds.includes(itemId);
+                  return (
+                    <div key={itemId} className="flex flex-wrap items-center gap-3">
+                      <label className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleInventorySelection("selectedSupplyIds", itemId)}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="truncate">{item.name}</span>
+                        <span className="shrink-0 text-xs text-slate-500">
+                          ({item.amount.quantity} {item.amount.unit} available)
+                        </span>
+                      </label>
+                      {isSelected && (
+                        <label className="flex items-center gap-2 text-xs text-slate-600">
+                          Needed
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            required
+                            value={draft.supplyAmounts[itemId] ?? ""}
+                            onChange={(event) => updateSupplyAmount(itemId, event.target.value)}
+                            aria-label={`Amount of ${item.name} needed`}
+                            className={`${inputClassName} mt-0 w-24`}
+                          />
+                          {item.amount.unit}
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {draft.retainedResources.length > 0 && (
+              <p className="mt-2 text-xs text-amber-700">
+                Existing supply requirements not matched to inventory will be kept unchanged.
+              </p>
+            )}
+          </label>
+          <div className="sm:col-span-2">
+            <span className="text-sm font-medium text-slate-700">Equipment needed</span>
+            {equipment.length === 0 ? (
+              <p className="mt-1 text-sm text-slate-500">
+                No equipment in this lab&apos;s inventory yet. Add equipment in Inventory before selecting it here.
+              </p>
+            ) : (
+              <div className="mt-2 max-h-40 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-3">
+                {equipment.map((item) => {
+                  const itemId = String(item.id);
+                  return (
+                    <label key={itemId} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={draft.selectedEquipmentIds.includes(itemId)}
+                        onChange={() => toggleInventorySelection("selectedEquipmentIds", itemId)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      {item.name}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <label className="mt-3 block text-sm text-slate-700">
+              Additional equipment (optional)
+              <input
+                name="additionalEquipment"
+                value={draft.additionalEquipment}
+                onChange={updateField}
+                placeholder="Comma-separated equipment not in inventory"
+                className={inputClassName}
+              />
+            </label>
+          </div>
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Start date</span>
             <input
