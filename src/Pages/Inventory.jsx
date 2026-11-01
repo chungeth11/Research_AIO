@@ -187,6 +187,7 @@ function Inventory({
   lab,
   selectedLabId,
   onSelectedLabChange,
+  userEmail,
   onCalendarNavigate,
   inventoryFocus,
   onInventoryFocusHandled,
@@ -387,6 +388,7 @@ function Inventory({
       <LabSelector
         selectedLabId={selectedLabId}
         onSelectedLabChange={onSelectedLabChange}
+        userEmail={userEmail}
       />
       <button
         type="button"

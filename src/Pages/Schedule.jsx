@@ -315,6 +315,7 @@ function Schedule({
   lab,
   selectedLabId,
   onSelectedLabChange,
+  userEmail,
   calendarFocus,
   onCalendarFocusHandled,
 }) {
@@ -722,6 +723,7 @@ function Schedule({
           <LabSelector
             selectedLabId={selectedLabId}
             onSelectedLabChange={onSelectedLabChange}
+            userEmail={userEmail}
           />
           <button
             type="button"

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import CertificationTrainingItemModal from "./CertificationTrainingItemModal";
 import Modal from "./Modal";
 
 function CertificationsTrainingModal({
@@ -6,9 +7,12 @@ function CertificationsTrainingModal({
   trainings,
   uploads,
   onUpload,
+  canManage = false,
+  onUpdate,
   onClose,
 }) {
   const [uploadErrors, setUploadErrors] = useState({});
+  const [editingRequirement, setEditingRequirement] = useState(null);
 
   function handleFileSelection(section, id, event) {
     const file = event.target.files?.[0];
@@ -80,14 +84,65 @@ function CertificationsTrainingModal({
             />
           </label>
         </div>
+        {canManage && (
+          <div className="mt-3 flex justify-end gap-3 border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              onClick={() => setEditingRequirement({ section, requirement })}
+              className="text-sm font-semibold text-blue-700 hover:underline"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => onUpdate(
+                section === "certification" ? "certifications" : "trainings",
+                (section === "certification" ? certifications : trainings)
+                  .filter((item) => item.id !== requirement.id),
+              )}
+              className="text-sm font-semibold text-rose-700 hover:underline"
+            >
+              Delete
+            </button>
+          </div>
+        )}
       </li>
     );
+  }
+
+  function handleSaveRequirement(item) {
+    if (!canManage) return;
+    const collection = editingRequirement.section === "certification" ? "certifications" : "trainings";
+    const originalItems = collection === "certifications" ? certifications : trainings;
+    const updatedItem = item.id === null ? { ...item, id: crypto.randomUUID() } : item;
+    onUpdate(
+      collection,
+      editingRequirement.requirement.id === null
+        ? [...originalItems, updatedItem]
+        : originalItems.map((existing) => existing.id === updatedItem.id ? updatedItem : existing),
+    );
+    setEditingRequirement(null);
+  }
+
+  function addRequirement(section) {
+    setEditingRequirement({
+      section,
+      requirement: section === "certification"
+        ? { id: null, name: "", status: "Active", expires: "" }
+        : { id: null, name: "", completed: 0, total: 0 },
+    });
   }
 
   return (
     <Modal
       titleId="certifications-training-title"
-      onClose={onClose}
+      onClose={() => {
+        if (editingRequirement) {
+          setEditingRequirement(null);
+        } else {
+          onClose();
+        }
+      }}
       className="max-w-3xl"
     >
       <div className="flex items-start justify-between gap-4">
@@ -127,9 +182,12 @@ function CertificationsTrainingModal({
       </div>
 
       <section aria-labelledby="required-certifications" className="mt-6">
-        <h3 id="required-certifications" className="text-lg font-bold text-slate-900">
-          Required certifications
-        </h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 id="required-certifications" className="text-lg font-bold text-slate-900">
+            Required certifications
+          </h3>
+          {canManage && <button type="button" onClick={() => addRequirement("certification")} className="text-sm font-semibold text-blue-700 hover:underline">Add</button>}
+        </div>
         <ul className="mt-3 space-y-3">
           {certifications.map((certification) =>
             renderRequirement(
@@ -143,9 +201,12 @@ function CertificationsTrainingModal({
       </section>
 
       <section aria-labelledby="required-trainings" className="mt-7">
-        <h3 id="required-trainings" className="text-lg font-bold text-slate-900">
-          Required training
-        </h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 id="required-trainings" className="text-lg font-bold text-slate-900">
+            Required training
+          </h3>
+          {canManage && <button type="button" onClick={() => addRequirement("training")} className="text-sm font-semibold text-blue-700 hover:underline">Add</button>}
+        </div>
         <ul className="mt-3 space-y-3">
           {trainings.map((training) =>
             renderRequirement(
@@ -159,6 +220,14 @@ function CertificationsTrainingModal({
           )}
         </ul>
       </section>
+      {editingRequirement && canManage && (
+        <CertificationTrainingItemModal
+          section={editingRequirement.section}
+          requirement={editingRequirement.requirement}
+          onClose={() => setEditingRequirement(null)}
+          onSave={handleSaveRequirement}
+        />
+      )}
     </Modal>
   );
 }

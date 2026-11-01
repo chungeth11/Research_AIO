@@ -1,8 +1,30 @@
 import { useState } from "react";
 import Modal from "./Modal";
 
-function ApplyModal({ labName, position, onClose }) {
+function ApplyModal({ labName, position, onClose, onSubmit }) {
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const result = onSubmit({
+      applicantName: String(formData.get("applicantName") ?? "").trim(),
+      applicantEmail: String(formData.get("applicantEmail") ?? "").trim(),
+      applicantPhone: String(formData.get("applicantPhone") ?? "").trim(),
+      message: String(formData.get("coverLetter") ?? "").trim(),
+      resumeFileName: formData.get("resume")?.name ?? "",
+      positionTitle: position.title,
+    });
+
+    if (result) {
+      setSubmitError(result);
+      return;
+    }
+
+    setSubmitError("");
+    setIsSubmitted(true);
+  }
 
   return (
     <Modal titleId="application-title" onClose={onClose} className="max-w-xl">
@@ -38,8 +60,8 @@ function ApplyModal({ labName, position, onClose }) {
         </div>
         {isSubmitted ? (
           <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-            Your application details were entered, but this demo cannot send
-            applications to the lab yet.
+            Your application was saved for the lab owner in this browser.
+            Resume files are not uploaded or retained.
             <button
               type="button"
               onClick={onClose}
@@ -49,13 +71,12 @@ function ApplyModal({ labName, position, onClose }) {
             </button>
           </div>
         ) : (
-          <form
-            className="mt-6 space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setIsSubmitted(true);
-            }}
-          >
+          <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+            {submitError && (
+              <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">
+                {submitError}
+              </p>
+            )}
             <label className="block">
               <span className="text-sm font-medium text-slate-700">Full name</span>
               <input
@@ -123,7 +144,7 @@ function ApplyModal({ labName, position, onClose }) {
                 type="submit"
                 className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
-                Review application
+                Submit application
               </button>
             </div>
           </form>

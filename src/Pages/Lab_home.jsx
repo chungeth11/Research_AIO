@@ -1,6 +1,15 @@
 import { useState } from "react";
 import CertificationsTrainingModal from "../UIparts/CertificationsTrainingModal";
 import LabSelector from "../UIparts/LabSelector";
+import LabDetailsModal from "../UIparts/LabDetailsModal";
+import LabHomeItemModal from "../UIparts/LabHomeItemModal";
+import LabMembersModal from "../UIparts/LabMembersModal";
+import {
+  canManageLabContent,
+  getLabHomeStorageKey,
+  getLabMembersStorageKey,
+  isLabOwner,
+} from "../utils/labHome";
 import { labs } from "./Labs";
 
 const labHomeExamples = {
@@ -326,27 +335,272 @@ const labHomeExamples = {
 };
 
 
+function loadLabHomeContent(labId) {
+  const lab = labs.find(({ id }) => id === labId) ?? labs[0];
+  const example = labHomeExamples[labId] ?? {};
+  const defaultContent = {
+    ...example,
+    name: example.name ?? lab.name,
+    organization: {
+      ...(typeof example.organization === "object" ? example.organization : {}),
+      name: example.organization?.name ?? lab.organization,
+      organizationImageUrl: example.organization?.organizationImageUrl ?? lab.organizationImageUrl,
+    },
+    type: example.type ?? lab.type,
+    description: example.description ?? lab.description,
+    email: example.email ?? "",
+    phone: example.phone ?? "",
+    biosafetyLevel: example.biosafetyLevel ?? "",
+    principalInvestigator: example.principalInvestigator ?? { name: "", title: "Principal Investigator" },
+    location: {
+      ...lab.location,
+      ...example.location,
+      campus: example.location?.campus ?? "",
+      building: example.location?.building ?? lab.location.building,
+      address: example.location?.address ?? "",
+      room: example.location?.room ?? lab.location.room,
+      rooms: example.location?.rooms ?? `Room ${lab.location.room}`,
+      city: example.location?.city ?? lab.location.city,
+      state: example.location?.state ?? lab.location.state,
+    },
+    statistics: example.statistics ?? { members: 0, activeProjects: 0, publications: 0 },
+    certifications: example.certifications ?? [],
+    trainings: example.trainings ?? [],
+    announcements: example.announcements ?? [],
+    attentionItems: example.attentionItems ?? [],
+    papers: example.papers ?? [],
+  };
 
+  try {
+    const storedContent = window.localStorage.getItem(getLabHomeStorageKey(labId));
+    if (!storedContent) return { content: defaultContent, error: "" };
 
-function Lab_home({ selectedLabId, onSelectedLabChange }) {
+    const parsedContent = JSON.parse(storedContent);
+    if (!parsedContent || typeof parsedContent !== "object" || Array.isArray(parsedContent)) {
+      throw new Error("Saved lab home data is not in the expected format.");
+    }
+
+    return {
+      content: {
+        ...defaultContent,
+        ...parsedContent,
+      },
+      error: "",
+    };
+  } catch (error) {
+    return {
+      content: defaultContent,
+      error: `Could not load saved lab home items: ${error.message}`,
+    };
+  }
+}
+
+function getTodayLabel() {
+  return new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function createLabHomeItemId() {
+  return crypto.randomUUID();
+}
+
+function loadLabMembers(labId) {
+  try {
+    const storedMembers = window.localStorage.getItem(getLabMembersStorageKey(labId));
+    if (!storedMembers) return { members: [], error: "" };
+
+    const members = JSON.parse(storedMembers);
+    if (
+      !Array.isArray(members) ||
+      members.some((member) =>
+        !member ||
+        typeof member.email !== "string" ||
+        !["Admin", "Member", "Viewer"].includes(member.role)
+      )
+    ) {
+      throw new Error("Saved member permissions are not in the expected format.");
+    }
+
+    return { members, error: "" };
+  } catch (error) {
+    return { members: [], error: `Could not load lab members: ${error.message}` };
+  }
+}
+
+function Lab_home({ selectedLabId, onSelectedLabChange, userEmail }) {
   const [isComplianceModalOpen, setIsComplianceModalOpen] = useState(false);
   const [complianceUploads, setComplianceUploads] = useState({});
+  const [contentState, setContentState] = useState(() => loadLabHomeContent(selectedLabId));
+  const [activeAddType, setActiveAddType] = useState("");
+  const [editingItem, setEditingItem] = useState(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
+  const [membersState, setMembersState] = useState(() => loadLabMembers(selectedLabId));
   const selectedLab = labs.find(({ id }) => id === selectedLabId) ?? labs[0];
-  const selectedLabContent = labHomeExamples[selectedLab.id]
-    ?? labHomeExamples[labs[0].id];
+  const isOwner = isLabOwner(selectedLab, userEmail);
+  const canManageLab = canManageLabContent(selectedLab, userEmail, membersState.members);
+  const selectedLabContent = contentState.content;
+
+  function updateMembers(nextMembers) {
+    if (!isOwner) return "Only the lab owner can change member permissions.";
+    try {
+      window.localStorage.setItem(
+        getLabMembersStorageKey(selectedLab.id),
+        JSON.stringify(nextMembers),
+      );
+      setMembersState({ members: nextMembers, error: "" });
+      return "";
+    } catch (error) {
+      return `Could not save lab member permissions: ${error.message}`;
+    }
+  }
+
+  function updateLabContent(update) {
+    const nextContent = update(selectedLabContent);
+    setContentState({ content: nextContent, error: "" });
+
+    try {
+      window.localStorage.setItem(
+        getLabHomeStorageKey(selectedLab.id),
+        JSON.stringify(nextContent),
+      );
+    } catch (error) {
+      setContentState({
+        content: nextContent,
+        error: `Could not save lab home items: ${error.message}`,
+      });
+    }
+  }
+
+  function openAddForm(type, item = null) {
+    setEditingItem(item);
+    setActiveAddType(type);
+  }
+
+  function handleAddItem(event) {
+    event.preventDefault();
+    if (!canManageLab) return;
+    const formData = new FormData(event.currentTarget);
+    const title = String(formData.get("title") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim();
+    const id = editingItem?.id ?? createLabHomeItemId();
+    let item;
+    let collection;
+
+    if (activeAddType === "announcement") {
+      collection = "announcements";
+      item = { id, title, description, date: editingItem?.date ?? getTodayLabel() };
+    } else if (activeAddType === "attention") {
+      collection = "attentionItems";
+      item = {
+        id,
+        title,
+        description,
+        priority: formData.get("priority"),
+        category: String(formData.get("category") ?? "").trim(),
+      };
+    } else {
+      collection = "papers";
+      item = {
+        id,
+        title,
+        authors: String(formData.get("authors") ?? "").split(",").map((author) => author.trim()).filter(Boolean),
+        journal: String(formData.get("journal") ?? "").trim(),
+        year: Number(formData.get("year")),
+        tags: String(formData.get("tags") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean),
+        url: String(formData.get("url") ?? "").trim() || "#",
+      };
+    }
+
+    updateLabContent((currentContent) => ({
+      ...currentContent,
+      [collection]: editingItem
+        ? currentContent[collection].map((currentItem) => currentItem.id === id ? item : currentItem)
+        : [...currentContent[collection], item],
+    }));
+    setActiveAddType("");
+    setEditingItem(null);
+  }
+
+  function handleDeleteItem(collection, id) {
+    if (!canManageLab) return;
+    updateLabContent((currentContent) => ({
+      ...currentContent,
+      [collection]: currentContent[collection].filter((item) => item.id !== id),
+    }));
+  }
+
+  function handleSaveLabDetails(event) {
+    event.preventDefault();
+    if (!canManageLab) return;
+    const formData = new FormData(event.currentTarget);
+    updateLabContent((currentContent) => ({
+      ...currentContent,
+      name: String(formData.get("name")).trim(),
+      type: String(formData.get("type")).trim(),
+      description: String(formData.get("description")).trim(),
+      organization: {
+        ...currentContent.organization,
+        name: String(formData.get("organization")).trim(),
+        organizationImageUrl: String(formData.get("organizationImageUrl")).trim(),
+      },
+      email: String(formData.get("email")).trim(),
+      phone: String(formData.get("phone")).trim(),
+      biosafetyLevel: String(formData.get("biosafetyLevel")).trim(),
+      principalInvestigator: {
+        name: String(formData.get("principalInvestigatorName")).trim(),
+        title: String(formData.get("principalInvestigatorTitle")).trim(),
+      },
+      location: {
+        ...currentContent.location,
+        institution: String(formData.get("institution")).trim(),
+        campus: String(formData.get("campus")).trim(),
+        building: String(formData.get("building")).trim(),
+        address: String(formData.get("address")).trim(),
+        room: String(formData.get("room")).trim(),
+        rooms: `Room ${String(formData.get("room")).trim()}`,
+        city: String(formData.get("city")).trim(),
+        state: String(formData.get("state")).trim(),
+      },
+      statistics: {
+        members: Number(formData.get("members")),
+        activeProjects: Number(formData.get("activeProjects")),
+        publications: Number(formData.get("publications")),
+      },
+    }));
+    setIsDetailsModalOpen(false);
+  }
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-8 text-slate-900">
+    <div className="mx-auto w-full space-y-8 text-slate-900">
+      {contentState.error && (
+        <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {contentState.error}
+        </p>
+      )}
+      {membersState.error && (
+        <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {membersState.error}
+        </p>
+      )}
+      {!canManageLab && !selectedLab.ownerEmail && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Lab editing is read-only until an owner email is configured for this lab.
+        </p>
+      )}
       <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-4">
             <div
-              aria-label={`${selectedLab.organization} logo`}
+              aria-label={`${selectedLabContent.organization.name} logo`}
               className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-white"
             >
               <svg aria-hidden="true" className="h-full w-full" viewBox="0 0 150 150">
                 <image
-                  href={selectedLab.organizationImageUrl}
+                  href={selectedLabContent.organization.organizationImageUrl}
                   width="150"
                   height="150"
                   preserveAspectRatio="xMidYMid meet"
@@ -354,18 +608,19 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
               </svg>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-blue-500">{selectedLab.organization}</p>
-              <p className="mt-1 text-sm text-slate-500">{selectedLab.type}</p>
+              <p className="text-sm font-semibold text-blue-500">{selectedLabContent.organization.name}</p>
+              <p className="mt-1 text-sm text-slate-500">{selectedLabContent.type}</p>
               <h1 className="mt-5 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-                {selectedLab.name}
+                {selectedLabContent.name}
               </h1>
-              <p className="mt-1 text-sm text-slate-500">{selectedLab.description}</p>
+              <p className="mt-1 text-sm text-slate-500">{selectedLabContent.description}</p>
             </div>
           </div>
           <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
             <LabSelector
               selectedLabId={selectedLabId}
               onSelectedLabChange={onSelectedLabChange}
+              userEmail={userEmail}
             />
             <button
               type="button"
@@ -374,6 +629,24 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
             >
               Certifications &amp; training
             </button>
+            {canManageLab && (
+              <button
+                type="button"
+                onClick={() => setIsDetailsModalOpen(true)}
+                className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                Edit lab details
+              </button>
+            )}
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setIsMembersModalOpen(true)}
+                className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                Manage members
+              </button>
+            )}
           </div>
         </div>
 
@@ -381,24 +654,24 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Location</p>
             <p className="mt-1 font-medium text-slate-800">
-              {selectedLab.location.building}, Room {selectedLab.location.room}
+              {selectedLabContent.location.building}, Room {selectedLabContent.location.room}
             </p>
             <p className="text-slate-500">
-              {selectedLab.location.institution} · {selectedLab.location.city}, {selectedLab.location.state}
+              {selectedLabContent.location.institution} · {selectedLabContent.location.city}, {selectedLabContent.location.state}
             </p>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Research area</p>
-            <p className="mt-1 font-medium text-slate-800">{selectedLab.type}</p>
+            <p className="mt-1 font-medium text-slate-800">{selectedLabContent.type}</p>
           </div>
         </div>
       </header>
 
       {/* <section aria-label="Lab overview" className="grid gap-4 sm:grid-cols-3">
         {[
-          { label: "Lab members", value: lab.statistics.members },
-          { label: "Active projects", value: lab.statistics.activeProjects },
-          { label: "Publications", value: lab.statistics.publications },
+          { label: "Lab members", value: selectedLabContent.statistics.members },
+          { label: "Active projects", value: selectedLabContent.statistics.activeProjects },
+          { label: "Publications", value: selectedLabContent.statistics.publications },
         ].map((stat) => (
           <article key={stat.label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-medium text-slate-500">{stat.label}</p>
@@ -410,23 +683,51 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
         ))}
       </section> */}
 
-      <section aria-label="Updates and items needing attention" className="grid gap-6 lg:grid-cols-2">
+      <section aria-label="Updates and items needing attention" className="h-[300px] grid gap-6 lg:grid-cols-2">
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 overflow-y-auto">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold text-slate-900">Announcements</h2>
               <p className="mt-1 text-sm text-slate-500">News and updates from your lab</p>
             </div>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-              {selectedLabContent.announcements.length} updates
-            </span>
+            <div className="flex items-center gap-2 -mt-4">
+              {canManageLab && <button
+                type="button"
+                onClick={() => openAddForm("announcement")}
+                className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                Add
+              </button>}
+            </div>
           </div>
           <ul className="mt-5 divide-y divide-slate-100">
             {selectedLabContent.announcements.map((announcement) => (
-              <li key={announcement.id} className="py-4 first:pt-0 last:pb-0">
-                <p className="text-xs font-medium text-blue-500">{announcement.date}</p>
-                <h3 className="mt-1 font-semibold text-slate-800">{announcement.title}</h3>
-                <p className="mt-1 text-sm leading-5 text-slate-600">{announcement.description}</p>
+              <li key={announcement.id} className="flex items-start justify-between gap-3 py-4 first:pt-0 last:pb-0">
+                <div>
+                  <p className="text-xs font-medium text-blue-500">{announcement.date}</p>
+                  <h3 className="mt-1 font-semibold text-slate-800">{announcement.title}</h3>
+                  <p className="mt-1 text-sm leading-5 text-slate-600">{announcement.description}</p>
+                </div>
+                {canManageLab && (
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/* <button
+                      type="button"
+                      onClick={() => openAddForm("announcement", announcement)}
+                      aria-label={`Edit announcement: ${announcement.title}`}
+                      className="text-sm font-medium text-blue-700 hover:underline"
+                    >
+                      Edit
+                    </button> */}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteItem("announcements", announcement.id)}
+                      aria-label={`Delete announcement: ${announcement.title}`}
+                      className="text-lg font-medium text-gray-600 hover:text-gray-900"
+                    >
+                      x
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -438,27 +739,55 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
               <h2 className="text-xl font-bold text-red-700">Needs attention</h2>
               <p className="mt-1 text-sm text-slate-500">Items that may need follow-up</p>
             </div>
-            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
-              {selectedLabContent.attentionItems.length} items
-            </span>
+            <div className="flex items-center gap-2">
+              {canManageLab && <button
+                type="button"
+                onClick={() => openAddForm("attention")}
+                className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500 -mt-3"
+              >
+                Add
+              </button>}
+            </div>
           </div>
           <ul className="mt-5 divide-y divide-slate-100">
             {selectedLabContent.attentionItems.map((item) => (
-              <li key={item.id} className="py-4 first:pt-0 last:pb-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold text-slate-800">{item.title}</h3>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      item.priority === "High"
-                        ? "bg-rose-50 text-rose-700"
-                        : "bg-amber-50 text-amber-800"
-                    }`}
-                  >
-                    {item.priority} priority
-                  </span>
+              <li key={item.id} className="flex items-start justify-between gap-3 py-4 first:pt-0 last:pb-0">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-slate-800">{item.title}</h3>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        item.priority === "High"
+                          ? "bg-rose-50 text-rose-700"
+                          : "bg-amber-50 text-amber-800"
+                      }`}
+                    >
+                      {item.priority} priority
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm leading-5 text-slate-600">{item.description}</p>
+                  <p className="mt-2 text-xs font-medium text-slate-400">{item.category}</p>
                 </div>
-                <p className="mt-1 text-sm leading-5 text-slate-600">{item.description}</p>
-                <p className="mt-2 text-xs font-medium text-slate-400">{item.category}</p>
+                {canManageLab && (
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/* <button
+                      type="button"
+                      onClick={() => openAddForm("attention", item)}
+                      aria-label={`Edit attention item: ${item.title}`}
+                      className="text-sm font-medium text-blue-700 hover:underline"
+                    >
+                      Edit
+                    </button> */}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteItem("attentionItems", item.id)}
+                      aria-label={`Delete attention item: ${item.title}`}
+                      className="text-lg font-medium text-gray-600 hover:text-gray-900"
+                    >
+                      x
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -471,9 +800,15 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
             <h2 id="publications-heading" className="text-xl font-bold text-slate-900">Recent publications</h2>
             <p className="mt-1 text-sm text-slate-500">Selected work from the research team</p>
           </div>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-            {selectedLabContent.papers.length} papers
-          </span>
+          <div className="flex items-center gap-2">
+            {canManageLab && <button
+              type="button"
+              onClick={() => openAddForm("publication")}
+              className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              Add publication
+            </button>}
+          </div>
         </div>
         <ul className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {selectedLabContent.papers.map((publication) => (
@@ -483,11 +818,13 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
               </p>
               <h3 className="mt-2 flex-1 font-semibold leading-5 text-slate-800">{publication.title}</h3>
               <p className="mt-2 text-xs leading-5 text-slate-500">{publication.authors.join(", ")}</p>
-              <p className="mt-2 text-sm leading-5 text-slate-600">
-                <a href={publication.url} className="text-blue-500 hover:text-blue-800 underline">
-                  Read full paper
-                </a>
-              </p>
+              {publication.url && publication.url !== "#" && (
+                <p className="mt-2 text-sm leading-5 text-slate-600">
+                  <a href={publication.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-800 underline">
+                    Read full paper
+                  </a>
+                </p>
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 {publication.tags.map((tag) => (
                   <span key={tag} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
@@ -495,14 +832,71 @@ function Lab_home({ selectedLabId, onSelectedLabChange }) {
                   </span>
                 ))}
               </div>
+            <div className="mt-4 flex gap-2">
+                 {canManageLab && (
+              <button
+                type="button"
+                onClick={() => openAddForm("publication", publication)}
+                aria-label={`Edit publication: ${publication.title}`}
+                className=" self-start rounded px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                Edit
+              </button>
+              )}
+              {canManageLab && (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteItem("papers", publication.id)}
+                  aria-label={`Delete publication: ${publication.title}`}
+                  className="self-start rounded px-2 py-1 text-sm font-medium text-rose-600 hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
             </li>
           ))}
         </ul>
       </section>
+      {isDetailsModalOpen && canManageLab && (
+        <LabDetailsModal
+          labContent={selectedLabContent}
+          onClose={() => setIsDetailsModalOpen(false)}
+          onSubmit={handleSaveLabDetails}
+        />
+      )}
+      {isMembersModalOpen && isOwner && (
+        <LabMembersModal
+          labName={selectedLabContent.name}
+          ownerEmail={selectedLab.ownerEmail}
+          members={membersState.members}
+          onChange={updateMembers}
+          onClose={() => setIsMembersModalOpen(false)}
+        />
+      )}
+      {activeAddType && canManageLab && (
+        <LabHomeItemModal
+          type={activeAddType}
+          item={editingItem}
+          labName={selectedLabContent.name}
+          onClose={() => {
+            setActiveAddType("");
+            setEditingItem(null);
+          }}
+          onSubmit={handleAddItem}
+        />
+      )}
       {isComplianceModalOpen && (
         <CertificationsTrainingModal
           certifications={selectedLabContent.certifications}
           trainings={selectedLabContent.trainings}
+          canManage={canManageLab}
+          onUpdate={(collection, items) =>
+            updateLabContent((currentContent) => ({
+              ...currentContent,
+              [collection]: items,
+            }))
+          }
           uploads={complianceUploads[selectedLab.id] ?? {}}
           onUpload={(key, file) =>
             setComplianceUploads((currentUploads) => ({

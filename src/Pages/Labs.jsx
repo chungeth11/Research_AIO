@@ -1,10 +1,46 @@
 import { useState } from "react";
 import ApplyModal from "../UIparts/ApplyModal";
+import LabApplicationsModal from "../UIparts/LabApplicationsModal";
+import Modal from "../UIparts/Modal";
+import {
+  canManageLabContent,
+  getLabApplicationsStorageKey,
+  getLabHomeStorageKey,
+  getLabMembersStorageKey,
+} from "../utils/labHome";
+
+function createJobId() {
+  return crypto.randomUUID();
+}
+
+function loadLabRecords(storageKey, validate, label) {
+  try {
+    const storedRecords = window.localStorage.getItem(storageKey);
+    if (!storedRecords) return { records: [], error: "" };
+    const records = JSON.parse(storedRecords);
+    if (!validate(records)) throw new Error(`${label} are not in the expected format.`);
+    return { records, error: "" };
+  } catch (error) {
+    return { records: [], error: `Could not load ${label}: ${error.message}` };
+  }
+}
+
+function isValidApplicationList(applications) {
+  return Array.isArray(applications) && applications.every((application) =>
+    application &&
+    typeof application.id === "string" &&
+    typeof application.applicantName === "string" &&
+    typeof application.applicantEmail === "string" &&
+    typeof application.positionTitle === "string",
+  );
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const labs = [
 {
     id: 1,
     name: "Martinez Neural Plasticity Lab",
+    ownerEmail: "owner@example.com",
     organization: "Helix Research Institute",
     type: "Environmental Sciences",
 organizationImageUrl: "https://placehold.co/150x150?text=HRI",
@@ -71,6 +107,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=HRI",
 {
     id: 2,
     name: "Chen Molecular Therapeutics Lab",
+    ownerEmail: "",
     organization: "Pacific Biomedical Center",
     type:"Molecular biology" ,
 organizationImageUrl: "https://placehold.co/150x150?text=PBC",
@@ -137,6 +174,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=PBC",
 {
     id: 3,
     name: "Brooks Genome Engineering Lab",
+    ownerEmail: "",
     organization: "North Valley University",
     type: "History",
 organizationImageUrl: "https://placehold.co/150x150?text=NVU",
@@ -184,6 +222,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=NVU",
 {
     id: 4,
     name: "Rivera Metabolic Disease Lab",
+    ownerEmail: "",
     type: "psychology",
     organization: "Central Health Sciences University",
 organizationImageUrl: "https://placehold.co/150x150?text=CHSU",
@@ -210,6 +249,7 @@ organizationImageUrl: "https://placehold.co/150x150?text=CHSU",
 {
     id: 5,
     name: "Patel Cellular Imaging Lab",
+    ownerEmail: "",
     type: "femboy and christian studies",
     organization: "East Coast Medical Institute",
 organizationImageUrl: "https://placehold.co/150x150?text=ECMI",
@@ -256,11 +296,106 @@ organizationImageUrl: "https://placehold.co/150x150?text=ECMI",
   }
 ];
 
-function Labs() {
+function Labs({ userEmail }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedLabId, setSelectedLabId] = useState(null);
   const [applicationPosition, setApplicationPosition] = useState(null);
+  const [isJobModalOpen, setIsJobModalOpen] = useState(false);
+  const [jobFormError, setJobFormError] = useState("");
+  const [isApplicationsModalOpen, setIsApplicationsModalOpen] = useState(false);
   const [directoryView, setDirectoryView] = useState("labs");
+  const [initialApplications] = useState(() => Object.fromEntries(
+    labs.map((lab) => [
+      lab.id,
+      loadLabRecords(
+        getLabApplicationsStorageKey(lab.id),
+        isValidApplicationList,
+        "applications",
+      ),
+    ]),
+  ));
+  const [applicationsByLab, setApplicationsByLab] = useState(() =>
+    Object.fromEntries(
+      Object.entries(initialApplications).map(([labId, state]) => [labId, state.records]),
+    ),
+  );
+  const [applicationsErrors, setApplicationsErrors] = useState(() =>
+    Object.values(initialApplications).map(({ error }) => error).filter(Boolean),
+  );
+  const [initialMembers] = useState(() => Object.fromEntries(
+    labs.map((lab) => [
+      lab.id,
+      loadLabRecords(
+        getLabMembersStorageKey(lab.id),
+        (members) => Array.isArray(members) && members.every((member) =>
+          member &&
+          typeof member.email === "string" &&
+          ["Admin", "Member", "Viewer"].includes(member.role),
+        ),
+        "lab member permissions",
+      ),
+    ]),
+  ));
+  const membersByLab = Object.fromEntries(
+    Object.entries(initialMembers).map(([labId, state]) => [labId, state.records]),
+  );
+  const memberErrors = Object.values(initialMembers).map(({ error }) => error).filter(Boolean);
+  const [initialPostedJobs] = useState(() => {
+    try {
+      const savedJobs = JSON.parse(
+        window.localStorage.getItem("research-aio-lab-job-postings") ?? "{}",
+      );
+      if (
+        !savedJobs ||
+        typeof savedJobs !== "object" ||
+        Array.isArray(savedJobs) ||
+        Object.values(savedJobs).some((positions) =>
+          !Array.isArray(positions) ||
+          positions.some((position) =>
+            !position ||
+            typeof position !== "object" ||
+            !["number", "string"].includes(typeof position.id) ||
+            typeof position.title !== "string" ||
+            typeof position.employmentType !== "string" ||
+            typeof position.description !== "string" ||
+            !position.salaryRange ||
+            typeof position.salaryRange.minimum !== "number" ||
+            typeof position.salaryRange.maximum !== "number" ||
+            typeof position.salaryRange.currency !== "string" ||
+            typeof position.salaryRange.period !== "string" ||
+            !Array.isArray(position.requirements),
+          ),
+        )
+      ) {
+        throw new Error("Posted job data is not in the expected format.");
+      }
+      return { jobs: savedJobs, error: "" };
+    } catch (error) {
+      return { jobs: {}, error: `Could not load posted jobs: ${error.message}` };
+    }
+  });
+  const [postedJobsByLab, setPostedJobsByLab] = useState(initialPostedJobs.jobs);
+  const [postedJobsError, setPostedJobsError] = useState(initialPostedJobs.error);
+  const [savedLabDetailsState] = useState(() => {
+    const details = {};
+    const errors = [];
+    for (const lab of labs) {
+      try {
+        const savedContent = window.localStorage.getItem(getLabHomeStorageKey(lab.id));
+        if (savedContent) {
+          const parsed = JSON.parse(savedContent);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Saved lab details are not in the expected format.");
+          }
+          details[lab.id] = parsed;
+        }
+      } catch (error) {
+        errors.push(`${lab.name}: ${error.message}`);
+      }
+    }
+    return { details, error: errors.length ? `Could not load saved lab details: ${errors.join("; ")}` : "" };
+  });
+  const savedLabDetails = savedLabDetailsState.details;
   const [initialSavedJobs] = useState(() => {
     try {
       const savedJobs = JSON.parse(
@@ -276,14 +411,38 @@ function Labs() {
   });
   const [savedJobKeys, setSavedJobKeys] = useState(initialSavedJobs.keys);
   const [savedJobsError, setSavedJobsError] = useState(initialSavedJobs.error);
-  const selectedLab = labs.find((lab) => lab.id === selectedLabId);
+  const directoryLabs = labs.map((lab) => {
+    const savedDetails = savedLabDetails[lab.id];
+    const hiringPositions = [
+      ...lab.hiringPositions,
+      ...(Array.isArray(postedJobsByLab[lab.id]) ? postedJobsByLab[lab.id] : []),
+    ];
+    return {
+      ...lab,
+      name: savedDetails?.name ?? lab.name,
+      organization: savedDetails?.organization?.name ?? lab.organization,
+      organizationImageUrl: savedDetails?.organization?.organizationImageUrl ?? lab.organizationImageUrl,
+      type: savedDetails?.type ?? lab.type,
+      description: savedDetails?.description ?? lab.description,
+      location: { ...lab.location, ...savedDetails?.location },
+      hiringPositions,
+      isHiring: hiringPositions.length > 0,
+    };
+  });
+  const selectedLab = directoryLabs.find((lab) => lab.id === selectedLabId);
+  const canManageSelectedLab = canManageLabContent(
+    selectedLab,
+    userEmail,
+    membersByLab[selectedLab?.id] ?? [],
+  );
+  const selectedApplications = applicationsByLab[selectedLab?.id] ?? [];
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
-  const savedJobs = labs.flatMap((lab) =>
+  const savedJobs = directoryLabs.flatMap((lab) =>
     lab.hiringPositions
       .filter((position) => savedJobKeys.includes(`${lab.id}-${position.id}`))
       .map((position) => ({ lab, position, key: `${lab.id}-${position.id}` })),
   );
-  const filteredLabs = labs.filter((lab) =>
+  const filteredLabs = directoryLabs.filter((lab) =>
     [lab.name, lab.description, lab.location.institution, lab.location.city, lab.location.state]
       .join(" ")
       .toLowerCase()
@@ -304,6 +463,69 @@ function Labs() {
       setSavedJobsError("");
     } catch (error) {
       setSavedJobsError(`Could not save your saved jobs: ${error.message}`);
+    }
+  }
+
+  function handlePostJob(event) {
+    event.preventDefault();
+    if (!selectedLab || !canManageLabContent(selectedLab, userEmail, membersByLab[selectedLab.id] ?? [])) return;
+    const formData = new FormData(event.currentTarget);
+    const minimum = Number(formData.get("salaryMinimum"));
+    const maximum = Number(formData.get("salaryMaximum"));
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum < 0 || maximum < minimum) {
+      setJobFormError("Enter valid salary values, with the minimum no greater than the maximum.");
+      return;
+    }
+
+    const requirements = String(formData.get("requirements") ?? "")
+      .split("\n")
+      .map((requirement) => requirement.trim())
+      .filter(Boolean);
+    const newPosition = {
+      id: createJobId(),
+      title: String(formData.get("title") ?? "").trim(),
+      employmentType: formData.get("employmentType"),
+      description: String(formData.get("description") ?? "").trim(),
+      salaryRange: {
+        minimum,
+        maximum,
+        currency: formData.get("currency"),
+        period: formData.get("period"),
+      },
+      requirements,
+    };
+    const nextJobs = {
+      ...postedJobsByLab,
+      [selectedLab.id]: [...(postedJobsByLab[selectedLab.id] ?? []), newPosition],
+    };
+
+    try {
+      window.localStorage.setItem("research-aio-lab-job-postings", JSON.stringify(nextJobs));
+      setPostedJobsByLab(nextJobs);
+      setPostedJobsError("");
+      setJobFormError("");
+      setIsJobModalOpen(false);
+    } catch (error) {
+      setJobFormError(`Could not save this job posting: ${error.message}`);
+    }
+  }
+
+  function handleApplicationSubmit(application) {
+    if (!selectedLab) return "Choose a lab before submitting your application.";
+    const nextApplications = [
+      ...(applicationsByLab[selectedLab.id] ?? []),
+      { ...application, id: crypto.randomUUID(), submittedAt: new Date().toISOString() },
+    ];
+    try {
+      window.localStorage.setItem(
+        getLabApplicationsStorageKey(selectedLab.id),
+        JSON.stringify(nextApplications),
+      );
+      setApplicationsByLab((current) => ({ ...current, [selectedLab.id]: nextApplications }));
+      setApplicationsErrors([]);
+      return "";
+    } catch (error) {
+      return `Could not submit your application: ${error.message}`;
     }
   }
 
@@ -482,6 +704,11 @@ function Labs() {
         aria-live="polite"
         className="min-h-0 min-w-0 flex-1 overflow-y-auto p-5 sm:p-8"
       >
+        {(savedLabDetailsState.error || postedJobsError || applicationsErrors.length > 0 || memberErrors.length > 0) && (
+          <p role="alert" className="mx-auto mb-4 max-w-4xl rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {[savedLabDetailsState.error, postedJobsError, ...applicationsErrors, ...memberErrors].filter(Boolean).join(" ")}
+          </p>
+        )}
         {selectedLab ? (
           <div className="mx-auto max-w-4xl space-y-6">
             <header className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -567,7 +794,7 @@ function Labs() {
               </article>
             </div>
 
-            {selectedLab.hiringPositions.length > 0 && (
+            {(selectedLab.hiringPositions.length > 0 || canManageSelectedLab) && (
               <section>
                 <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                   <div>
@@ -578,12 +805,39 @@ function Labs() {
                       Open positions
                     </h3>
                   </div>
-                  <span className="text-sm text-slate-500">
-                    {selectedLab.hiringPositions.length}{" "}
-                    {selectedLab.hiringPositions.length === 1 ? "opening" : "openings"}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-slate-500">
+                      {selectedLab.hiringPositions.length}{" "}
+                      {selectedLab.hiringPositions.length === 1 ? "opening" : "openings"}
+                    </span>
+                    {canManageSelectedLab && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setIsApplicationsModalOpen(true)}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          Applications ({selectedApplications.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setJobFormError("");
+                            setIsJobModalOpen(true);
+                          }}
+                          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          Post a job
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="grid gap-4 xl:grid-cols-2">
+                {selectedLab.hiringPositions.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">
+                    There are no current openings for this lab.
+                  </p>
+                ) : <div className="grid gap-4 xl:grid-cols-2">
                   {selectedLab.hiringPositions.map((position) => (
                     <article
                       key={position.id}
@@ -668,8 +922,13 @@ function Labs() {
                       </button>
                     </article>
                   ))}
-                </div>
+                </div>}
               </section>
+            )}
+            {!canManageSelectedLab && !selectedLab.ownerEmail && (
+              <p className="text-xs text-slate-500">
+                Job posting is read-only until an owner email is configured for this lab.
+              </p>
             )}
           </div>
         ) : (
@@ -702,8 +961,91 @@ function Labs() {
         <ApplyModal
           labName={selectedLab.name}
           position={applicationPosition}
+          onSubmit={handleApplicationSubmit}
           onClose={() => setApplicationPosition(null)}
         />
+      )}
+      {isApplicationsModalOpen && selectedLab && canManageSelectedLab && (
+        <LabApplicationsModal
+          labName={selectedLab.name}
+          applications={selectedApplications}
+          onClose={() => setIsApplicationsModalOpen(false)}
+        />
+      )}
+      {isJobModalOpen && selectedLab && canManageSelectedLab && (
+        <Modal
+          titleId="post-lab-job-title"
+          onClose={() => setIsJobModalOpen(false)}
+          className="max-w-2xl"
+        >
+          <form onSubmit={handlePostJob} className="space-y-5">
+            <div>
+              <h2 id="post-lab-job-title" className="text-xl font-bold text-slate-900">
+                Post a job
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">{selectedLab.name}</p>
+            </div>
+            {jobFormError && (
+              <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {jobFormError}
+              </p>
+            )}
+            <label className="block text-sm font-medium text-slate-700">
+              Job title
+              <input name="title" required maxLength={120} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal text-slate-900" />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm font-medium text-slate-700">
+                Employment type
+                <select name="employmentType" required defaultValue="Full-time" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal text-slate-900">
+                  <option>Full-time</option>
+                  <option>Part-time</option>
+                  <option>Contract</option>
+                  <option>Internship</option>
+                  <option>Temporary</option>
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                Pay period
+                <select name="period" required defaultValue="year" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal text-slate-900">
+                  <option value="year">Year</option>
+                  <option value="hour">Hour</option>
+                </select>
+              </label>
+            </div>
+            <label className="block text-sm font-medium text-slate-700">
+              Description
+              <textarea name="description" required rows="4" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal text-slate-900" />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <label className="block text-sm font-medium text-slate-700">
+                Minimum pay
+                <input name="salaryMinimum" type="number" min="0" step="any" required className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal text-slate-900" />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                Maximum pay
+                <input name="salaryMaximum" type="number" min="0" step="any" required className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal text-slate-900" />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                Currency
+                <select name="currency" defaultValue="USD" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal text-slate-900">
+                  <option>USD</option>
+                  <option>CAD</option>
+                  <option>EUR</option>
+                  <option>GBP</option>
+                </select>
+              </label>
+            </div>
+            <label className="block text-sm font-medium text-slate-700">
+              Requirements <span className="font-normal text-slate-500">(one per line)</span>
+              <textarea name="requirements" rows="4" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal text-slate-900" />
+            </label>
+            <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setIsJobModalOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+              <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Publish job</button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );

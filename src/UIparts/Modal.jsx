@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-function Modal({ titleId, onClose, className = "", children }) {
+function Modal({ titleId, onClose, className = "", zIndex = 50, children }) {
   useEffect(() => {
     function handleKeyDown(event) {
       if (event.key === "Escape") onClose();
@@ -12,7 +12,8 @@ function Modal({ titleId, onClose, className = "", children }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4"
+      style={{ zIndex }}
+      className="fixed inset-0 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}

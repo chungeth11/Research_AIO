@@ -55,6 +55,7 @@ function Profile() {
   const [isEditing, setIsEditing] = useState(false);
   const [resumeError, setResumeError] = useState("");
   const resumeInputRef = useRef(null);
+  const labAffiliations = profile.labsIn;
   const [draft, setDraft] = useState({
     name: profile.name,
     email: profile.email,
@@ -455,11 +456,11 @@ function Profile() {
               </p>
             </div>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-              {profile.labsIn.length} affiliations
+              {labAffiliations.length} affiliations
             </span>
           </div>
           <ul className="mt-5 divide-y divide-slate-100">
-            {profile.labsIn.map((lab) => (
+            {labAffiliations.map((lab) => (
               <li key={lab.id} className="flex items-center gap-3 py-4 first:pt-0 last:pb-0">
                 <span
                   aria-hidden="true"

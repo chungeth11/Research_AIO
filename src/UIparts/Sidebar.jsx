@@ -3,8 +3,9 @@ const tabs = [
     name: 'Labs',
     icon: (
       <>
-        <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6" />
-        <path d="M8 10h.01M12 10h.01M16 10h.01" />
+<path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+<rect x="3" y="7" width="18" height="13" rx="2" />
+<path d="M3 12h18M10 12v2h4v-2" />
       </>
     ),
   },

@@ -484,6 +484,7 @@ function Experiments({
   lab,
   selectedLabId,
   onSelectedLabChange,
+  userEmail,
   onCalendarNavigate,
   onInventoryNavigate,
 }) {
@@ -693,6 +694,7 @@ function Experiments({
           <LabSelector
             selectedLabId={selectedLabId}
             onSelectedLabChange={onSelectedLabChange}
+            userEmail={userEmail}
           />
           <button
             type="button"

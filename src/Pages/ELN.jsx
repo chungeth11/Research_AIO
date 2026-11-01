@@ -47,7 +47,7 @@ function loadFolders(storageKey) {
   }
 }
 
-function ELN({ lab, selectedLabId, onSelectedLabChange }) {
+function ELN({ lab, selectedLabId, onSelectedLabChange, userEmail }) {
   const storageKey = `research-aio-eln-lab-${selectedLabId}`;
   const foldersStorageKey = `${storageKey}-folders`;
   const [initialNotebook] = useState(() => loadNotebook(storageKey));
@@ -232,6 +232,7 @@ function ELN({ lab, selectedLabId, onSelectedLabChange }) {
           <LabSelector
             selectedLabId={selectedLabId}
             onSelectedLabChange={onSelectedLabChange}
+            userEmail={userEmail}
           />
           <button
             type="button"

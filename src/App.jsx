@@ -32,7 +32,8 @@ function App() {
   const [calendarFocus, setCalendarFocus] = useState(null)
   const [inventoryFocus, setInventoryFocus] = useState(null)
   const [authState, setAuthState] = useState({ loading: true, session: null, error: null })
-  const selectedLab = labs.find(({ id }) => id === selectedLabId) ?? labs[0]
+  const userEmail = authState.session?.user?.email
+  const selectedLab = labs.find(({ id }) => id === selectedLabId) ?? labs[0] ?? null
   const ActivePage = pages[activeTab]
 
   useEffect(() => {
@@ -114,11 +115,13 @@ function App() {
             : 'overflow-y-auto overflow-x-hidden p-4 sm:p-8'
       }`}>
         <ActivePage
-          key={`${activeTab}-${selectedLabId}`}
+          key={`${activeTab}-${selectedLab?.id ?? 'none'}`}
           onTabChange={setActiveTab}
           lab={selectedLab}
           userId={authState.session.user?.id}
-          selectedLabId={selectedLabId}
+          userEmail={userEmail}
+          visibleLabs={labs}
+          selectedLabId={selectedLab?.id ?? null}
           onSelectedLabChange={setSelectedLabId}
           calendarFocus={activeTab === 'Schedule' ? calendarFocus : null}
           onCalendarNavigate={(date, time) => {
